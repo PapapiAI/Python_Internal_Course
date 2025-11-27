@@ -85,7 +85,7 @@ Thực hiện bài tập bằng **2 cách**:
 > **Yêu cầu:**
 > Viết chương trình tính lương của nhân viên dựa trên thâm niên công tác (TNCT) theo quy định sau:
 > * Công thức tính lương: `Lương = hệ số × lương căn bản`
-> * Trong đó lương căn bản = 650000
+> * Trong đó lương căn bản = 1000000
 
 **Quy định hệ số theo TNCT (tính theo tháng)**:
 * Nếu TNCT < 12 tháng ⇒ hệ số = 1.92
@@ -162,7 +162,7 @@ Thực hiện bài tập bằng **2 cách**:
 ### Hướng dẫn các bước thực hiện
 
 * Bước 1: Nhập một số nguyên dương `x` từ bàn phím
-* Bước 2: Tính căn bậc hai của `x` bằng `Math.sqrt(x)` và lưu kết quả vào biến squareRoot
+* Bước 2: Tính căn bậc hai của `x` bằng `math.sqrt(x)` và lưu kết quả vào biến squareRoot
 * Bước 3: Kiểm tra nếu squareRoot là số nguyên (có phần thập phân bằng 0, tức `squareRoot % 1 == 0`), thì x là số chính phương. Ngược lại, x không phải là số chính phương
 * Bước 4: In ra thông báo tương ứng với kết quả kiểm tra ở Bước 3
 
