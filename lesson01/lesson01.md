@@ -600,5 +600,181 @@ repeat_message("Hi", None) # Người gọi cố tình truyền None => ta cũng
 
 ### 7.1 String là immutable
 
-> Khái niệm:
-> * 
+> Trong Python, string là kiểu dữ liệu bất biến (immutable)
+> * Tức là: sau khi tạo chuỗi, không thể sửa trực tiếp từng ký tự bên trong nó
+
+* Ví dụ:
+
+```python
+s = "python"
+s[0] = "P"  # Lỗi: 'str' object does not support item assignment
+```
+
+* Muốn thay đổi một phần chuỗi, bắt buộc phải tạo ra chuỗi mới:
+
+```python
+s = "python"
+s = "P" + s[1:]  # tạo chuỗi mới từ kí tự 'P' + nối phần còn lại "ython"
+print(s)  # Python
+```
+
+* Chuỗi trong Python là một iterable => có thể duyệt từng ký tự bằng vòng lặp hoặc kiểm tra từng ký tự giống như duyệt list
+
+```python
+s = "python"
+for ch in s:
+    print(ch)
+
+print("a" in "banana") # True
+```
+
+---
+
+### 7.2 Truy cập & cắt chuỗi (index, slice)
+
+* Index
+
+```python
+s = "python"
+print(s[0])  # p
+print(s[-1])  # n (index âm tính từ phải sang)
+print(s[1:4])  # yth
+```
+
+* Slice: `s[start:end]`
+  * Lấy từ `start` đến `end - 1`
+  * Có thể bỏ `start` hoặc `end`
+
+```python
+s1 = "Hello World"
+print(s1[:5]) # "Hello" (từ đầu đến index 4)
+print(s1[6:]) # "World" (từ index 6 đến hết)
+print(s1[:]) # "Hello World"
+
+s2 = "abcdefg"
+print(s2[::2]) # "aceg" (bỏ qua 1 ký tự)
+print(s2[::-1]) # "gfedcba" (đảo ngược chuỗi)
+```
+
+---
+
+### 7.3 Các phương thức thường dùng
+
+#### 7.3.1 Thay đổi kiểu chữ: upper(), lower(), title()
+
+```python
+s3 = "hello world"
+
+print(s3.upper()) # "HELLO WORLD"
+print(s3.lower()) # "hello world"
+print(s3.title()) # "Hello World"
+```
+
+#### 7.3.2 Xử lý khoảng trắng & thay thế: strip(), replace()
+
+```python
+s4 = "   hello world   "
+
+print(s4.strip()) # "hello world" (bỏ khoảng trắng đầu & cuối)
+print(s4.lstrip()) # "hello world   " (bỏ bên trái)
+print(s4.rstrip()) # "   hello world" (bỏ bên phải)
+
+print(s4.strip().replace("hello", "hi"))  # "hi world"
+```
+
+* `strip()`: bỏ khoảng trắng (hoặc ký tự chỉ định) ở đầu và cuối chuỗi
+* `lstrip()` / `rstrip()`: bỏ bên trái / bên phải
+* `replace(old, new)`: thay tất cả old bằng new trong chuỗi
+
+#### 7.3.3 Tách & ghép chuỗi: split(), join()
+
+* `split()` – tách chuỗi thành list các từ/phần tử
+
+```python
+s5 = "python is fun"
+words = s5.split() # mặc định tách theo khoảng trắng
+print(words) # ['python', 'is', 'fun']
+
+s6 = "a,b,c,d"
+items = s6.split(",") # tách theo dấu phẩy
+print(items) # ['a', 'b', 'c', 'd']
+```
+
+* `join()` – ghép list chuỗi thành một chuỗi
+
+```python
+words2 = ["python", "is", "boring"]
+sentence = " ".join(words2)
+print(sentence)  # "python is boring"
+
+items2 = ["a", "b", "c"]
+print("-".join(items2)) # "a-b-c"
+```
+
+#### 7.3.4 Một số hàm & phương thức tiện dụng khác
+
+* `len()` – độ dài chuỗi
+
+```python
+s = "hello"
+print(len(s))  # 5
+```
+
+* `startswith()`, `endswith()` – kiểm tra đầu/cuối chuỗi
+
+```python
+filename = "report.pdf"
+
+print(filename.endswith(".pdf")) # True
+print(filename.startswith("rep")) # True
+print(filename.startswith("Report")) # False (phân biệt hoa thường)
+```
+
+---
+
+### 7.4 So sánh chuỗi
+
+> Trong Python, so sánh chuỗi chủ yếu dùng toán tử so sánh
+
+#### 7.4.1 So sánh bằng == (so sánh nội dung)
+
+```python
+a = "hello"
+b = "hello"
+c = "Hello"
+
+print(a == b)  # nội dung giống nhau => True
+print(a == c)  # khác hoa/thường => False
+```
+
+* Chuỗi được so sánh theo từng ký tự, phân biệt chữ hoa – chữ thường
+* Nếu muốn so sánh không phân biệt hoa thường, cần đưa cả 2 về cùng `lower()` hoặc `upper()`
+
+#### 7.4.2 So sánh lớn hơn/nhỏ hơn (<, >, …)
+
+> Chuỗi được so sánh theo thứ tự từ điển (lexicographic)
+
+```python
+print("apple" < "banana") # True
+print("abc" > "ab") # True (vì 'abc' dài hơn, 'ab' là prefix)
+```
+
+#### 7.4.3 Không dùng is để so sánh nội dung chuỗi
+
+> `is` được dùng để so sánh object có cùng địa chỉ trong bộ nhớ hay không
+
+---
+
+### 7.5 Thực hành nhanh về chuỗi
+
+#### BTTH9: Chuẩn hóa họ tên
+
+* `"  nGuyEn vAn a   "` => `"Nguyen Van A"`
+
+#### BTTH10: Kiểm tra chuỗi đối xứng
+
+* `level`, `madam `, `122 1`
+
+#### BTTH11: Đếm số lượng nguyên âm trong chuỗi
+
+* Nguyên âm tiếng Anh gồm: a, e, i, o, u
