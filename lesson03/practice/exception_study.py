@@ -38,4 +38,27 @@ except Exception as e:
 
 
 # ===== Tự tạo exception bằng raise =====
+def divide(a, b):
+    if b == 0:
+        raise ValueError("b không được = 0")
+    return a / b
+
+try:
+    divide(5, 0)
+except ValueError as e:
+    print("Lỗi:", e)
+
+
+# ===== Áp dụng Exception vào File I/O =====
+filename = input("Nhập tên file: ")
+
+try:
+    with open(filename, "r", encoding="utf-8") as f:
+        print(f.read())
+except FileNotFoundError:
+    print("File không tồn tại!")
+except PermissionError:
+    print("Bạn không có quyền đọc file này!")
+except Exception as e:
+    print("Lỗi khác:", e)
 

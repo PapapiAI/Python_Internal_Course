@@ -1,4 +1,4 @@
-# Python Core – Buổi 3: Cấu trúc dữ liệu (List – Tuple – Dict – Set) & Debug
+# Python Core – Buổi 3: File I/O, Exception, Module, DateTime/Time & OOP thiết yếu
 
 # 1) Module & Tổ Chức Code trong Python
 
@@ -220,17 +220,20 @@ Cú pháp: `open(path, mode, encoding)`
 | `"r+"` | Đọc + Ghi                         | File phải tồn tại          |
 | `"b"`  | Binary mode                       | Dùng cho ảnh, pdf, mp3     |
 
-Ví dụ:
 
 ```python
 f = open("data.txt", "r", encoding="utf-8")
 ```
 
+Hàm `open(...)` trả về `TextIOWrapper`, là lớp đại diện cho file text trong Python, cung cấp các hàm:
+* `read()` / `readline()` / `readlines()`
+* `write()` / `writelines()` ...
+
 ---
 
 ## 2.3 Đọc file
 
-### 2.3.1 `read()`: đọc toàn bộ file thành một chuỗi
+### 2.3.1 `read()`: đọc toàn bộ file, trả về một chuỗi
 
 ```python
 with open("data.txt", "r", encoding="utf-8") as f:
@@ -244,7 +247,16 @@ print(content)
 with open("data.txt", "r", encoding="utf-8") as f:
     line1 = f.readline()
     line2 = f.readline()
+    line3 = f.readline().strip()
+    line4 = f.readline().strip()
+
+print(line1)
+print(line2)
+print(line3)
+print(line4)
 ```
+
+> `strip()` giúp loại bỏ ký tự xuống dòng
 
 ### 2.3.3 `readlines()`: đọc tất cả dòng, trả về list
 
@@ -256,7 +268,16 @@ for line in lines:
     print(line.strip())
 ```
 
-> `strip()` giúp loại bỏ ký tự xuống dòng
+Kết quả:
+* lines là một list, mỗi phần tử là 1 dòng (bao gồm ký tự xuống dòng `\n`)
+
+```
+[
+    "Line 1\n",
+    "Line 2\n",
+    "Line 3\n"
+]
+```
 
 ---
 
@@ -264,22 +285,24 @@ for line in lines:
 
 ### 2.4.1 Ghi file bằng `write()`
 
-Chế độ `"w"` => ghi mới hoàn toàn:
+* Chế độ `"w"` => ghi mới hoàn toàn:
 
 ```python
 with open("output.txt", "w", encoding="utf-8") as f:
-    f.write("Xin chào Python!")
-    f.write("Dòng thứ hai")
+    f.write("Xin chào Python!\n")
+    f.write("Dòng thứ hai\n")
 ```
 
-Chế độ `"a"` => ghi nối thêm:
+* Chế độ `"a"` => ghi nối thêm:
 
 ```python
 with open("output.txt", "a", encoding="utf-8") as f:
-    f.write("Dòng mới được thêm vào")
+    f.write("Dòng mới được thêm vào\n")
 ```
 
 ### 2.4.2 Ghi list vào file
+
+* `write` với vòng lặp
 
 ```python
 lines = ["Hello", "Python", "File I/O"]
@@ -288,11 +311,19 @@ with open("list.txt", "w", encoding="utf-8") as f:
         f.write(line + "\n")
 ```
 
+* `writelines`
+
+```python
+with open("list.txt", "w", encoding="utf-8") as f:
+    lines = ["Xin chào Python!\n", "Dòng thứ hai\n"]
+    f.writelines(lines)
+```
+
 ---
 
 ## 2.5 Vì sao nên dùng `with open(...) as f:`
 
-**Context Manager** giúp:
+**With Statement Context Manager** giúp:
 
 * Tự đóng file, kể cả khi có lỗi xảy ra
 * An toàn hơn `open()` + `close()`
@@ -318,7 +349,7 @@ with open("data.txt", "r") as f:
 
 ## 2.6 Xử lý ngoại lệ khi thao tác file
 
-### File không tồn tại → `FileNotFoundError`
+### File không tồn tại => ném `FileNotFoundError`
 
 ```python
 try:
@@ -491,12 +522,6 @@ finally:
 
 ---
 
-
-
-
-
-
-
 ## 3.7 Tự tạo exception bằng `raise`
 
 Khi muốn báo lỗi chủ động:
@@ -537,24 +562,31 @@ except Exception as e:
 
 ## 3.9 Tư duy xử lý lỗi đúng cách
 
-Khi viết code, hãy tự hỏi:
+* Khi viết code, hãy tự hỏi:
+  * Đoạn nào có nguy cơ lỗi? => cần bọc `try/except`
+  * Người dùng cần biết gì? => cần trả thông báo dễ hiểu
+  * Có cần đóng file, giải phóng tài nguyên?
+  * Có nên dừng chương trình hay tiếp tục?
 
-* Đoạn nào có nguy cơ lỗi → bọc try/except
-* Người dùng cần biết gì? (Thông báo dễ hiểu)
-* Có cần đóng file, giải phóng tài nguyên?
-* Có nên dừng chương trình hay tiếp tục?
-
-Sai lầm thường gặp:
-
-* Bắt lỗi chung chung mà không xử lý gì
-* Che dấu lỗi khiến debug khó hơn
-* Bỏ qua `finally` khiến file không được đóng
+* Sai lầm thường gặp:
+  * Bắt lỗi chung chung (bắt Exception) mà không xử lý gì
+  * Che dấu lỗi khiến debug khó hơn
+  * Bỏ qua `finally` khiến file hoặc tài nguyên không được đóng
 
 ---
 
+
+
+
+
+
+
+
+
+
 ## 3.10 Thực hành Exception Handling
 
-### BTTH8 – Bắt lỗi nhập số
+### BTTH1 – Bắt lỗi nhập số
 
 Viết chương trình:
 

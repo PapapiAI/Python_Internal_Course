@@ -1,0 +1,8 @@
+# Danh sách học viên khóa Python
+Nguyen Van A, 20, 8.5
+Tran Thi B, 19, 7.0
+Le Van C, 21, 9.0
+
+# Ghi chú:
+- Điểm trong file chỉ là dữ liệu demo
+- Mỗi dòng gồm: Họ tên, tuổi, điểm
