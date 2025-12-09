@@ -453,8 +453,8 @@ for i in range(row):
 #### BTTH5: Đếm số ký tự 'a' trong chuỗi
 
 > Viết chương trình:
-> * Nhập 1 số nguyên `n` từ bàn phím
-> * Tính `1 + 2 + ... + n`
+> * Nhập 1 chuỗi bất kỳ `string` từ bàn phím
+> * Đếm số ký tự 'a' trong chuỗi `string`
 
 #### BTTH6: In các hình sau
 
