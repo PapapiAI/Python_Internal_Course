@@ -1106,6 +1106,10 @@ p.set_age(25)
 print(p.get_age())
 ```
 
+### 5.7.2 Giải pháp Pythonic: `@property`
+
+Python hỗ trợ cách viết gọn hơn nhiều:
+
 ```python
 class Person:
     def __init__(self, name, age):
@@ -1123,82 +1127,209 @@ class Person:
         self._age = value
 ```
 
-Sử dụng như thuộc tính bình thường:
+Cách dùng như thuộc tính thông thường:
 
 ```python
 p = Person("An", 20)
-print(p.age)
 
-p.age = 25          # gọi setter
-# p.age = -1       # sẽ raise ValueError
+print(p.age) # gọi getter, age ko phải là biến thật (_age là biến thật)
+p.age = 25 # gọi setter
+
+try:
+    p.age = -1 # raise ValueError
+except ValueError as e:
+    print(e)
+```
+
+Điểm đặc biệt:
+
+> Nhìn qua thì giống method, nhưng dùng thì giống attribute
+
+### 5.7.3 Lợi ích cực lớn của `@property`
+
+> Giữ ổn định cho code nơi sử dụng
+
+* Ban đầu bạn cho phép gán trực tiếp:
+
+```python
+p.age = 20
+```
+
+* Sau đó muốn thêm validate, log, kiểm tra quyền, ...
+=> chỉ cần thêm setter:
+
+```python
+@age.setter
+def age(...):
+    ...
+```
+
+* Toàn bộ code đang sử dụng class không cần sửa lại
+
+### 5.7.3 Thuộc tính chỉ đọc
+
+Nếu muốn "tuổi chỉ đọc, không được sửa":
+
+```python
+class Person:
+    def __init__(self, income):
+        self._income = income
+
+    @property
+    def income(self):
+        return self._income
+```
+
+Không có setter => không thể gán:
+
+```python
+# Lỗi TypeError: 
+# Person.__init__() missing 1 required positional argument: 'income'
+p.income = 1000
 ```
 
 ---
 
-## 5.7 `__str__` và `__repr__` – in object cho đẹp
+## 5.7 `__str__` và `__repr__`: in object theo format
 
-Mặc định, in object cho kết quả khó đọc:
+Mặc định, in object cho kết quả rất khó đọc:
 
 ```python
-s = Student("An", 20, 8.5)
-print(s)  # <__main__.Student object at 0x00000123>
+students = [Student("An", 20, 8.5), Student("Binh", 21, 6.0)]
+print(students) 
 ```
 
-Ta có thể định nghĩa `__str__` để in đẹp hơn:
+Để điều khiển cách object được hiển thị, Python cung cấp 2 magic methods:
+* `__str__()`: dành cho người dùng
+* `__repr__()`: dành cho dev để debug
+
+## 5.7.1 `__str__`
+
+Nên định nghĩa `__str__` để in theo format:
 
 ```python
-class Student:
-    def __init__(self, name, age, score):
-        self.name = name
-        self.age = age
-        self.score = score
+class Person:
+    def __init__(self, name, age, income):
+        self._name = name
+        self._age = age
+        self._income = income
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def age(self):
+        return self._age
+
+    @age.setter
+    def age(self, value):
+        if value < 0:
+            raise ValueError("Age must be non-negative")
+        self._age = value
+
+    @property
+    def income(self):
+        return self._income
 
     def __str__(self):
-        return f"Student(name={self.name}, age={self.age}, score={self.score})"
+        return f"{self.name} ({self.age} tuổi) - Thu nhập: {self.income} usd/tháng"
 ```
 
 Giờ in:
 
 ```python
-s = Student("An", 20, 8.5)
-print(s)
-# Student(name=An, age=20, score=8.5)
+p = Person("An", 20, 1000)
+print(p)
 ```
 
-> `__str__` rất hữu ích khi debug & log dữ liệu.
+> `__str__` rất thân thiện với người dùng
+
+## 5.7.2 `__repr__`
+
+> `__repr__` được dùng khi:
+> * Gõ tên object trong Python shell
+> * In một list chứa object: `print([s1, s2])`
+> * Debug trong IDE
+> * logging dành cho dev
+
+Mục tiêu:
+* Trả về chuỗi mô tả object một cách rõ ràng và không mơ hồ
+* Có thể copy-paste để tạo lại object
+
+Định nghĩa `__repr__`
+
+```python
+class Person:
+    def __repr__(self):
+        return f"Person(name={self.name!r}, age={self.age}, income={self.income})"
+```
+
+`!r` trong `f-string` là format specifier dùng để:
+* gọi `repr()` của giá trị thay vì `str()` để in `f-string`
+* buộc Python in chuỗi biểu diễn chính xác của object => có dấu `''`
+* nếu `name` chứa ký tự đặc biệt, xuống dòng, khoảng trắng đầu/cuối, ... thì `repr()` giữ nguyên
+
+`!s` trong `f-string` sẽ gọi `str()`
+
+> `__repr__`: chuỗi dành cho dev, ưu tiên độ chính xác hơn tính thẩm mỹ
 
 ---
 
-## 5.8 `*args` và `**kwargs` – linh hoạt tham số (giới thiệu thiết yếu)
+## 5.8 `*args` và `**kwargs`: linh hoạt tham số
 
-Trong OOP, đôi khi ta muốn constructor hoặc method **nhận số lượng tham số linh hoạt**.
+> Trong nhiều trường hợp, chúng ta cần viết một hàm có thể nhận số lượng tham số không cố định<br>
+> Python hỗ trợ điều này bằng hai cú pháp đặc biệt:
+> * `*args`: nhận `tuple` mọi tham số dạng positional (tham số không đặt tên)
+> * `**kwargs`: nhận `dict` mọi tham số dạng keyword (tham số có tên)
 
-* `*args` → nhận **tuple** các tham số không đặt tên
-* `**kwargs` → nhận **dict** các tham số có tên
+Đây là một trong những tính năng giúp Python cực kỳ linh hoạt khi thiết kế hàm và class
 
-Ví dụ đơn giản:
+## 5.8.1 `*args`: Nhận mọi positional arguments
+
+Dấu `*` trước `args` nghĩa là:
+* gom tất cả các tham số truyền vào (theo vị trí) thành một `tuple`
+
+Ví dụ:
 
 ```python
 class Logger:
-    def log(self, *args):
+    @staticmethod
+    def log(*args):
+        if not args:
+            print("No arguments")
+            return
         # ghép tất cả args thành một chuỗi
         message = " ".join(str(x) for x in args)
         print("[LOG]", message)
 
+# Sử dụng
 logger = Logger()
 logger.log("Xin chao", "Python", 3)
 ```
 
-Trong `__init__`:
+Giải thích:
+* Hàm không cố định số lượng tham số
+* Có thể truyền vào 0, 1 hoặc nhiều tham số tùy ý
+
+## 5.8.2 `*kwargs`: Nhận mọi keyword arguments
+
+Dấu `**` trước `args` nghĩa là:
+* gom các tham số dạng key=value thành một `dictionary`
+
+Ví dụ:
 
 ```python
-class Config:
-    def __init__(self, **kwargs):
-        self.host = kwargs.get("host", "localhost")
-        self.port = kwargs.get("port", 8000)
+def show_info(**kwargs):
+    print(kwargs)
 
-cfg = Config(host="127.0.0.1", port=9000)
+show_info(name="An", age=20, score=8.5)
 ```
+
+## 5.8.3 Kết hợp `*args` và `*kwargs`
+
+Có thể dùng cả hai trong cùng một hàm:
+
 
 > Phần này giúp học viên hiểu dần các constructor/method "linh hoạt" trong code thực tế.
 

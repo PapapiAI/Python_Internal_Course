@@ -1,5 +1,7 @@
 # ===== Khởi tạo object =====
 from lesson03.practice.oop.bank_account import BankAccount
+from lesson03.practice.oop.logger import Logger
+from lesson03.practice.oop.person import Person
 from student import Student
 
 # s1 = Student("An", 20, 8.5)
@@ -60,7 +62,49 @@ from student import Student
 
 
 # ===== Encapsulation =====
-acc = BankAccount("An", 1000)
-acc.deposit(500)
-acc.withdraw(300)
-print(acc.get_balance()) # 1200
+# acc = BankAccount("An", 1000)
+# acc.deposit(500)
+# acc.withdraw(300)
+# print(acc.get_balance()) # 1200
+
+
+# ===== @property =====
+# p = Person("An", 20)
+#
+# print(p.age) # gọi getter, age ko phải là biến thật (_age là biến thật)
+# p.age = 25 # gọi setter
+#
+# try:
+#     p.age = -1 # raise ValueError
+# except ValueError as e:
+#     print(e)
+
+# thuộc tính chỉ đọc
+# p.income = 1000 # Lỗi TypeError: Person.__init__() missing 1 required positional argument: 'income'
+
+
+# ===== __str__ =====
+# students = [Student("An", 20, 8.5), Student("Binh", 21, 6.0)]
+# print(students)
+#
+# p = Person("An", 20, 1000)
+# print(p)
+
+
+# ===== __repr__ =====
+# p2 = Person("Nam", 20, 1000)
+# print(repr(p2))
+
+
+# ===== *args =====
+logger = Logger()
+logger.log()
+logger.log("Xin chao", "Python", 3)
+
+
+# ===== *kwargs =====
+def show_info(**kwargs):
+    print(kwargs)
+
+show_info(name="An", age=20, score=8.5)
+
