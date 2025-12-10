@@ -575,74 +575,723 @@ except Exception as e:
 
 ---
 
-
-
-
-
-
-
-
-
-
 ## 3.10 Thực hành Exception Handling
 
 ### BTTH1 – Bắt lỗi nhập số
 
 Viết chương trình:
 
-1. Nhập một số nguyên từ người dùng
-2. Nếu nhập sai → báo lỗi và yêu cầu nhập lại
+* Nhập một số nguyên dương từ người dùng
+* Nếu nhập sai => báo lỗi và yêu cầu nhập lại
 
-Ví dụ chạy:
+Ví dụ:
 
 ```
 Nhập số: abc
-Sai! Vui lòng nhập lại.
+Nhập sai, vui lòng nhập lại
 Nhập số: 123
 Bạn đã nhập: 123
 ```
 
----
-
-### BTTH9 – Hàm chia có xử lý lỗi
-
-Viết hàm:
-
-```python
-def safe_divide(a, b):
-    # nếu b = 0 → raise lỗi
-```
-
-Sử dụng try/except khi gọi hàm và in kết quả.
-
----
-
-### BTTH10 – Đọc file an toàn
-
-Viết chương trình:
-
-* Hỏi người dùng tên file
-* Nếu file tồn tại → in nội dung
-* Nếu không tồn tại → báo lỗi thân thiện
-
----
-
-### BTTH11 – Tạo menu và xử lý lỗi lựa chọn
+### BTTH2 – Tạo menu và xử lý lỗi lựa chọn
 
 Menu:
 
 ```
 1. Xin chào
-2. Tính tổng 2 số
+2. Tính chỉ số BMI
 3. Thoát
 ```
 
 Yêu cầu:
 
-* Nếu người dùng nhập ký tự không phải số → báo lỗi
-* Nếu nhập số ngoài 1–3 → báo lỗi
-* Nếu đúng → thực thi chức năng
+* Nếu người dùng nhập ký tự không phải số => báo lỗi
+* Nếu nhập số ngoài 1–3 => báo lỗi
+* Nếu đúng => thực thi chức năng
+
+### BTTH3 – Đọc file an toàn
+
+  Viết chương trình với menu:
+
+Chọn chức năng:
+
+1. Đọc toàn bộ file (read)
+2. Đọc từng dòng (readline)
+3. Ghi đè file (write)
+4. Ghi thêm vào file (append)
+5. Thoát
 
 ---
 
+# 4) DateTime & Đo thời gian thực thi trong Python
 
+## 4.1 DateTime trong Python
+
+Python cung cấp module `datetime` để làm việc với thời gian và ngày tháng:
+
+* Lấy thời gian hiện tại
+* Tạo đối tượng ngày giờ cụ thể
+* Cộng/trừ ngày giờ
+* Format ngày giờ theo ý muốn
+* Parse (chuyển từ chuỗi => datetime)
+
+Import:
+
+```python
+from datetime import datetime, timedelta
+```
+
+---
+
+## 4.2 Lấy thời gian hiện tại
+
+```python
+from datetime import datetime
+
+now = datetime.now()
+print(now) 
+```
+
+### Các thuộc tính thường dùng:
+
+```python
+print(now.year)
+print(now.month)
+print(now.day)
+print(now.hour)
+print(now.minute)
+print(now.second)
+```
+
+---
+
+## 4.3 Tạo đối tượng DateTime cụ thể
+
+```python
+specific = datetime(2025, 1, 1, 8, 30, 0)
+print(specific)
+```
+
+> Thứ tự tham số: `year, month, day, hour, minute, second`
+
+---
+
+## 4.4 Định dạng ngày giờ: `strftime`
+
+Dùng để **chuyển** datetime => chuỗi
+
+```python
+now = datetime.now()
+formatted = now.strftime("%Y-%m-%d %H:%M:%S")
+print(formatted) 
+```
+
+### Các ký hiệu format phổ biến
+
+| Ký hiệu | Ý nghĩa                       |
+|---------|-------------------------------|
+| `%Y`    | Năm (4 chữ số)                |
+| `%m`    | Tháng (01–12)                 |
+| `%d`    | Ngày                          |
+| `%H`    | Giờ (00–23)                   |
+| `%M`    | Phút                          |
+| `%S`    | Giây                          |
+| `%A`    | Tên thứ (Monday, Tuesday ...) |
+
+```python
+print(now.strftime("Hôm nay là %A, ngày %d/%m/%Y"))
+```
+
+---
+
+## 4.5 Chuyển chuỗi thành datetime: `strptime`
+
+Dùng khi **đọc** dữ liệu dạng text từ file hoặc API
+
+```python
+s = "2025-02-14 20:30:00"
+dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+print(dt)
+```
+
+---
+
+## 4.6 Cộng / trừ ngày: `timedelta`
+
+`timedelta` cho phép cộng/trừ số ngày, giờ, phút
+
+```python
+from datetime import timedelta
+
+now = datetime.now()
+tomorrow = now + timedelta(days=1)
+yesterday = now - timedelta(days=1)
+
+print(tomorrow)
+print(yesterday)
+
+in_three_hours = now + timedelta(hours=3)
+two_weeks_ago = now - timedelta(weeks=2)
+
+print(in_three_hours)
+print(two_weeks_ago)
+```
+
+---
+
+## 4.7 So sánh thời gian
+
+`Datetime` hỗ trợ các phép so sánh trực tiếp:
+
+```python
+x = datetime(2025, 1, 1)
+y = datetime(2024, 1, 1)
+
+print(x > y) # True
+print(x == y) # False
+```
+
+---
+
+## 4.8 Đo thời gian thực thi đoạn code
+
+Có nhiều cách đo thời gian chạy, nhưng cách phổ biến nhất là dùng module `time`
+
+```python
+import time
+
+start = time.time()
+
+# --- đoạn code cần đo thời gian ---
+result = 0
+for i in range(1_000_000):
+    result += i
+# ----------------------------------
+
+end = time.time()
+elapsed = end - start
+print("Thời gian thực thi:", elapsed, "giây")
+```
+
+### Dùng `perf_counter()` (chính xác hơn)
+
+```python
+from time import perf_counter
+
+start = perf_counter()
+for i in range(1_000_000):
+    pass
+end = perf_counter()
+
+print("Elapsed:", end - start)
+```
+
+> `perf_counter()` phù hợp để đo các đoạn code nhỏ, độ chính xác cao
+
+---
+
+## 4.9 Ứng dụng DateTime trong dự án thực tế
+
+* Log thời gian thực thi (performance logging)
+* Gắn timestamp khi tạo/sửa bản ghi trong database
+* Tạo file backup theo ngày (`backup_2050_01_01.txt`)
+* Tính toán hạn sử dụng, ngày hết hạn
+* Phân tích log server theo mốc thời gian
+
+---
+
+## 4.10 Thực hành DateTime
+
+### BTTH4: In ngày giờ hiện tại theo nhiều định dạng
+
+In ra:
+
+```
+Năm-Tháng-Ngày: DD-MM-YYYY
+Giờ:Phút:Giây: HH:MM:SS
+Hôm nay là thứ mấy?
+```
+
+### BTTH5: Tính tuổi từ ngày sinh
+
+Nhập vào ngày sinh dạng `dd/mm/yyyy`, tính số tuổi hiện tại
+
+Gợi ý:
+
+```python
+dob = datetime.strptime(input_str, "%d/%m/%Y")
+age = (datetime.now() - dob).days // 365
+```
+
+### BTTH6: Đo thời gian thực thi thuật toán
+
+So sánh thời gian chạy giữa:
+
+1. Vòng lặp tính tổng từ 1 đến 1 triệu (dùng `time.time()`)
+2. Dùng công thức toán học: `n*(n+1)/2` (dùng `perf_counter()`)
+
+---
+
+# 5) OOP thiết yếu
+
+## 5.1 Vì sao cần OOP?
+
+Trước giờ, chúng ta viết code **theo kiểu thủ tục (procedural)**:
+
+* Dữ liệu: list, dict, ...
+* Hàm: nhận dữ liệu => xử lý => trả kết quả
+
+Khi chương trình lớn lên:
+
+* Nhiều biến rời rạc: `student_name`, `student_age`, `student_score`, ...
+* Nhiều hàm nhận rất nhiều tham số
+* Khó nhóm logic theo từng "thực thể" (học sinh, khóa học, đơn hàng, sản phẩm, ...)
+
+**OOP giúp**:
+
+* Gắn **dữ liệu (attributes)** và **hành vi (methods)** vào chung 1 đối tượng
+* Dễ mô hình hóa "thực thể thật" ngoài đời: Student, Course, Invoice, Product
+* Code rõ hơn, dễ bảo trì, dễ mở rộng
+
+Ví dụ: thay vì
+
+```python
+student_name = "An"
+student_age = 20
+student_score = 8.5
+```
+
+Chúng ta muốn có:
+
+```python
+student = Student(name="An", age=20, score=8.5)
+```
+
+---
+
+## 5.2 Khái niệm Class & Object
+
+* **Class**: "bản thiết kế" cho đối tượng
+  * Ví dụ: class `Student` mô tả *một kiểu* sinh viên (có name, age, score ...)
+  
+* **Object (instance)**: "đối tượng cụ thể" được tạo từ class
+  * Ví dụ: `student1`, `student2` là 2 sinh viên cụ thể
+
+Hãy hình dung:
+
+* Class `Student` giống như bản thiết kế một chiếc ghế
+* Mỗi "chiếc ghế" thực tế là một object
+
+---
+
+## 5.3 Định nghĩa class cơ bản, `__init__` và `self`
+
+### 5.3.1 Thêm hàm khởi tạo `__init__`
+
+```python
+class Student:
+    def __init__(self, name, age, score):
+        self.name = name # thuộc tính (attribute) của object
+        self.age = age
+        self.score = score
+```
+
+Giải thích:
+
+* `__init__` là **hàm khởi tạo** (constructor): tự động chạy khi tạo object
+* Tham số đầu tiên **luôn là `self`**:
+  * Đại diện cho **chính object đang được tạo/truy cập**
+  * `self.name` là thuộc tính name của đối tượng hiện tại
+
+Khởi tạo object:
+
+```python
+from student import Student
+
+s1 = Student("An", 20, 8.5)
+print(s1.name) # An
+print(s1.age) # 20
+print(s1.score) # 8.5
+
+s2 = Student("Binh", 21, 7.8)
+```
+
+> **`self` ~ "this object"** (tương tự `this` trong nhiều ngôn ngữ khác)
+
+---
+
+## 5.4 Thuộc tính & Phương thức (Attributes & Methods)
+
+### 5.4.1 Thuộc tính (Attribute)
+
+Là "biến" gắn với từng object
+
+```python
+class Student:
+    def __init__(self, name: str, age: int, score: float):
+        self.name = name
+        self.age = age
+        self.score = score
+```
+
+Đây là **instance attributes**, mỗi object có giá trị riêng
+
+### 5.4.2 Phương thức (Method)
+
+Là **hàm được định nghĩa bên trong class**, luôn có `self`:
+
+```python
+class Student:
+    def __init__(self, name, age, score):
+        self.name = name
+        self.age = age
+        self.score = score
+
+    def is_passed(self):
+        return self.score >= 5.0
+
+    def introduce(self):
+        print(f"Xin chào, mình là {self.name}, {self.age} tuổi.")
+```
+
+Dùng:
+
+```python
+s = Student("An", 20, 8.5)
+
+s.introduce() # Xin chào, mình là An, 20 tuổi.
+print(s.is_passed()) # True
+```
+
+> `self.score` truy cập vào điểm của **chính sinh viên đó**.
+
+---
+
+## 5.5 Danh sách đối tượng: `list[Student]`
+
+Khi đã có class `Student`, có thể tạo **danh sách sinh viên**:
+
+```python
+students = [
+    Student("An", 20, 8.5),
+    Student("Binh", 21, 6.0),
+    Student("Chi", 19, 4.5),
+]
+```
+
+* In danh sách sinh viên:
+
+```python
+for s in students:
+    s.introduce()
+```
+
+* Tính điểm trung bình của lớp
+
+```python
+def calc_avg_score(students):
+    if not students:
+        return 0
+    total = 0
+    for s in students:
+        total += s.score
+    return total / len(students)
+
+avg = calc_avg_score(students)
+print("Điểm trung bình lớp:", avg)
+```
+
+* Tìm sinh viên điểm cao nhất
+
+```python
+def find_top_student(students: list[Student]) -> Student | None:
+    if not students:
+        return None
+    top = students[0]
+    for s in students[1:]:
+        if s.score > top.score:
+            top = s
+    return top
+
+empty_list = []
+best = find_top_student(student_list)
+
+if not best:
+    print("Ko có data")
+else:
+    print("Top student:", best.name, best.score)
+```
+
+> Đây là pattern rất quan trọng `Collection + Operations on Collection`: **list các object** + **hàm hoặc method xử lý list đó**
+
+---
+
+## 5.6 Tính đóng gói (Encapsulation)
+
+Trong Python, không có "private" thật sự như Java/C#, nhưng có **quy ước**:
+
+* Thuộc tính/hàm bắt đầu bằng `_` => xem như internal (không nên dùng bên ngoài)
+
+Ví dụ:
+
+```python
+class BankAccount:
+    def __init__(self, owner, balance=0):
+        self.owner = owner
+        self._balance = balance  # "private" theo quy ước
+
+    def deposit(self, amount):
+        if amount <= 0:
+            print("Số tiền nạp phải > 0")
+            return
+        self._balance += amount
+
+    def withdraw(self, amount):
+        if amount > self._balance:
+            print("Không đủ số dư")
+            return
+        self._balance -= amount
+
+    def get_balance(self):
+        return self._balance
+```
+
+Dùng:
+
+```python
+acc = BankAccount("An", 1000)
+acc.deposit(500)
+acc.withdraw(300)
+print(acc.get_balance()) # 1200
+```
+
+> Mục đích: code bên ngoài **không nên chỉnh sửa _balance trực tiếp**, mà đi qua method `deposit`/`withdraw` để đảm bảo logic an toàn
+
+## 5.7 Sử dụng `@property`
+
+> Trong Python, chúng ta có thể biến method thành thuộc tính nhờ decorator `@property`, điều này giúp:
+> * Giấu đi logic `getter`/`setter`
+> * Viết code gọn, tự nhiên hơn
+> * Dễ thay đổi logic bên trong mà không ảnh hưởng nơi sử dụng
+> * Đảm bảo tính đóng gói theo đúng tinh thần OOP
+
+### 5.7.1 Vấn đề nếu không dùng `@property`
+
+Trong OOP, thuộc tính đôi khi cần:
+* kiểm tra dữ liệu đầu vào (age phải ≥ 0)
+* giới hạn quyền truy cập
+* tự động tính toán giá trị
+
+Nếu không dùng property, DEV phải viết `getter`/`setter` theo kiểu truyền thống:
+
+```python
+class Person:
+    def __init__(self, name, age):
+        self._name = name
+        self._age = age
+
+    def get_age(self):
+        return self._age
+
+    def set_age(self, value):
+        if value < 0:
+            raise ValueError("Age must be non-negative")
+        self._age = value
+```
+
+Nơi dùng:
+
+```python
+p.set_age(25)
+print(p.get_age())
+```
+
+```python
+class Person:
+    def __init__(self, name, age):
+        self._name = name
+        self._age = age
+
+    @property
+    def age(self):
+        return self._age
+
+    @age.setter
+    def age(self, value):
+        if value < 0:
+            raise ValueError("Age must be non-negative")
+        self._age = value
+```
+
+Sử dụng như thuộc tính bình thường:
+
+```python
+p = Person("An", 20)
+print(p.age)
+
+p.age = 25          # gọi setter
+# p.age = -1       # sẽ raise ValueError
+```
+
+---
+
+## 5.7 `__str__` và `__repr__` – in object cho đẹp
+
+Mặc định, in object cho kết quả khó đọc:
+
+```python
+s = Student("An", 20, 8.5)
+print(s)  # <__main__.Student object at 0x00000123>
+```
+
+Ta có thể định nghĩa `__str__` để in đẹp hơn:
+
+```python
+class Student:
+    def __init__(self, name, age, score):
+        self.name = name
+        self.age = age
+        self.score = score
+
+    def __str__(self):
+        return f"Student(name={self.name}, age={self.age}, score={self.score})"
+```
+
+Giờ in:
+
+```python
+s = Student("An", 20, 8.5)
+print(s)
+# Student(name=An, age=20, score=8.5)
+```
+
+> `__str__` rất hữu ích khi debug & log dữ liệu.
+
+---
+
+## 5.8 `*args` và `**kwargs` – linh hoạt tham số (giới thiệu thiết yếu)
+
+Trong OOP, đôi khi ta muốn constructor hoặc method **nhận số lượng tham số linh hoạt**.
+
+* `*args` → nhận **tuple** các tham số không đặt tên
+* `**kwargs` → nhận **dict** các tham số có tên
+
+Ví dụ đơn giản:
+
+```python
+class Logger:
+    def log(self, *args):
+        # ghép tất cả args thành một chuỗi
+        message = " ".join(str(x) for x in args)
+        print("[LOG]", message)
+
+logger = Logger()
+logger.log("Xin chao", "Python", 3)
+```
+
+Trong `__init__`:
+
+```python
+class Config:
+    def __init__(self, **kwargs):
+        self.host = kwargs.get("host", "localhost")
+        self.port = kwargs.get("port", 8000)
+
+cfg = Config(host="127.0.0.1", port=9000)
+```
+
+> Phần này giúp học viên hiểu dần các constructor/method "linh hoạt" trong code thực tế.
+
+---
+
+## 5.9 Thực hành OOP thiết yếu
+
+### BTTH16 – Class Student cơ bản
+
+Yêu cầu:
+
+1. Tạo class `Student` với các thuộc tính: `name`, `age`, `score`.
+2. Thêm method:
+
+   * `is_passed()` → trả về True nếu score ≥ 5
+   * `introduce()` → in giới thiệu đơn giản.
+3. Tạo 3 object Student và gọi thử các method.
+
+---
+
+### BTTH17 – Danh sách sinh viên & xử lý
+
+Dựa trên class `Student` ở BTTH16:
+
+1. Tạo list `students` chứa 5 sinh viên.
+2. Viết hàm:
+
+   * `print_all(students)` → in thông tin tất cả sinh viên
+   * `get_avg_score(students)` → trả về điểm trung bình
+   * `get_top_student(students)` → trả về sinh viên có score cao nhất
+3. Gọi các hàm trên để test.
+
+---
+
+### BTTH18 – Class BankAccount với đóng gói
+
+Thiết kế class `BankAccount`:
+
+* Thuộc tính: `owner`, `_balance` (mặc định = 0)
+* Method:
+
+  * `deposit(amount)` → nạp tiền, amount phải > 0
+  * `withdraw(amount)` → rút tiền, không cho phép rút quá số dư
+  * `get_balance()` → trả về số dư hiện tại
+
+Viết chương trình demo:
+
+* Tạo 1 tài khoản
+* Nạp tiền, rút tiền, in số dư sau mỗi lần.
+
+---
+
+### BTTH19 – Dùng `__str__` để debug
+
+Thêm `__str__` cho `Student` hoặc `BankAccount` để khi `print(object)` sẽ in ra thông tin rõ ràng.
+
+Ví dụ mong muốn:
+
+```text
+Student(name=An, age=20, score=8.5)
+BankAccount(owner=An, balance=1200)
+```
+
+---
+
+### BTTH20 – Bài tập mở rộng (tuỳ thời gian)
+
+Thiết kế class `Course`:
+
+* Thuộc tính: `name`, `students` (list[Student])
+* Method:
+
+  * `add_student(student)`
+  * `get_avg_score()` → điểm trung bình của khoá học
+  * `get_top_student()` → sinh viên điểm cao nhất
+
+Viết chương trình demo:
+
+* Tạo vài Student
+* Thêm vào Course
+* In điểm trung bình và sinh viên có điểm cao nhất.
+
+---
+
+## 5.10 Kết luận phần OOP thiết yếu
+
+Sau phần này, học viên cần:
+
+* Hiểu rõ khái niệm **class** và **object**
+* Biết định nghĩa `__init__`, dùng `self`, tạo attributes & methods
+* Biết dùng list các object và viết hàm xử lý danh sách đó
+* Nắm khái niệm đóng gói cơ bản, hiểu quy ước `_attribute`
+* Biết dùng `__str__` để hỗ trợ debug/log
+* Bắt đầu làm quen với `*args`, `**kwargs` trong method/constructor
+
+> Đây là nền tảng để sang các buổi sau dùng OOP cho FastAPI (models, schemas, services, …) một cách tự nhiên.
