@@ -2,14 +2,16 @@
 from lesson03.practice.oop.bank_account import BankAccount
 from lesson03.practice.oop.logger import Logger
 from lesson03.practice.oop.person import Person
+from lesson03.practice.oop.staff import Staff
 from student import Student
 
-# s1 = Student("An", 20, 8.5)
-# print(s1.name) # An
-# print(s1.age) # 20
-# print(s1.score) # 8.5
-#
-# s2 = Student("Binh", 21, 7.8)
+
+s1 = Student("An", 20, 8.5)
+print(s1.name) # An
+print(s1.age) # 20
+print(s1.score) # 8.5
+
+s2 = Student("Binh", 21, 7.8)
 
 
 # ===== Method =====
@@ -97,14 +99,58 @@ from student import Student
 
 
 # ===== *args =====
-logger = Logger()
-logger.log()
-logger.log("Xin chao", "Python", 3)
+# logger = Logger()
+# logger.log()
+# logger.log("Xin chao", "Python", 3)
 
 
 # ===== *kwargs =====
-def show_info(**kwargs):
-    print(kwargs)
+# def show_info(**kwargs):
+#     print(kwargs)
+#
+# show_info(name="An", age=20, score=8.5)
 
-show_info(name="An", age=20, score=8.5)
 
+# ===== Kết hợp `*args` và `*kwargs` =====
+# def introduce(
+#         name: str,
+#         age: int,
+#         *skills,
+#         title: str = "N/A",
+#         level: str = "basic",
+#         **extra_info) -> None:
+#     print("Name:", name)
+#     print("Age:", age)
+#     print("Skills:", skills)
+#     print("Title:", title)
+#     print("Level:", level)
+#     print("Extra:", extra_info)
+#
+#
+# introduce(
+#     "An",
+#     20,
+#     "Python",
+#     "Java",
+#     title="Developer",
+#     level="Fresher",
+#     hobby="gaming",
+#     city="Danang"
+# )
+
+
+# ===== Constructor linh hoạt =====
+# staff = Staff("An", 20, hobby="gaming", city="DN")
+# print(staff.extra)
+
+
+# ===== getattr() =====
+# staff = Staff("An", 20, hobby="gaming", city="DN")
+# print(getattr(staff, "name"))
+# print(getattr(staff, "extra"))
+
+# Khi không cung cấp default, Python sẽ báo lỗi:
+# print(getattr(staff, "salary"))
+
+# Xử lý khi thuộc tính không tồn tại
+# print(getattr(staff, "salary", "Không có lương"))

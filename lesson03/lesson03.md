@@ -1280,8 +1280,8 @@ class Person:
 
 > Trong nhiều trường hợp, chúng ta cần viết một hàm có thể nhận số lượng tham số không cố định<br>
 > Python hỗ trợ điều này bằng hai cú pháp đặc biệt:
-> * `*args`: nhận `tuple` mọi tham số dạng positional (tham số không đặt tên)
-> * `**kwargs`: nhận `dict` mọi tham số dạng keyword (tham số có tên)
+> * `*args`: nhận `tuple` mọi tham số dạng positional
+> * `**kwargs`: nhận `dict` mọi tham số dạng keyword
 
 Đây là một trong những tính năng giúp Python cực kỳ linh hoạt khi thiết kế hàm và class
 
@@ -1330,99 +1330,275 @@ show_info(name="An", age=20, score=8.5)
 
 Có thể dùng cả hai trong cùng một hàm:
 
+```python
+def introduce(
+        name: str,
+        age: int,
+        *skills,
+        title: str = "N/A",
+        level: str = "basic",
+        **extra_info) -> None:
+    print("Name:", name)
+    print("Age:", age)
+    print("Skills:", skills)
+    print("Title:", title)
+    print("Level:", level)
+    print("Extra:", extra_info)
 
-> Phần này giúp học viên hiểu dần các constructor/method "linh hoạt" trong code thực tế.
+
+introduce(
+    "An",
+    20,
+    "Python",
+    "Java",
+    title="Developer",
+    level="Fresher",
+    hobby="gaming",
+    city="Danang"
+)
+```
+
+Thứ tự bắt buộc: `positional_or_keyword  =>  *args  =>  keyword-only  =>  **kwargs`
+* Sau `*args`, mọi thứ đều được Python xem là tham số keyword-only
+* `positional_or_keyword`: tham số truyền theo vị trí hoặc truyền theo keyword
+
+## 5.8.4 Ứng dụng trong OOP
+
+* Constructor linh hoạt:
+
+```python
+class Staff:
+    def __init__(self, name: str, age: int, **kwargs):
+        self.name = name
+        self.age = age
+        self.extra = kwargs
+
+# Nơi dùng
+staff = Staff("An", 20, hobby="gaming", city="DN")
+print(staff.extra)
+```
+
+* Gọi hàm cha (`super`) với `kwargs`:
+
+```python
+class Teacher(Person):
+    def __init__(self, name: str, age: str, income: float, subject: str, years: float, **kwargs):
+        super().__init__(name, age, income, **kwargs)
+        self._subject = subject
+        self._years = years
+
+    @property
+    def subject(self):
+        return self._subject
+
+    @property
+    def years(self):
+        return self._years
+    @years.setter
+    def years(self, value: float):
+        if value < 0:
+            raise ValueError("Years must be non-negative")
+        self._years = value
+
+
+    def __str__(self):
+        return f"{self.name} - GV môn {self.subject}, {self.years} năm KN"
+
+    def __repr__(self):
+        return (f"Teacher(name={self.name!r}, age={self.age}, income={self.income}, "
+                f"subject={self.subject!r}, years={self.years})")
+```
+
+## 5.8.5 getattr(): Truy cập thuộc tính động
+
+Trong Python, ngoài cách truy cập thuộc tính thông thường:
+
+```
+staff.name
+staff.age
+```
+
+Còn có thể truy cập thuộc tính một cách linh hoạt và động bằng hàm built-in:
+
+```python
+getattr(object, attribute_name, default_value)
+```
+
+Đây là công cụ cực kỳ quan trọng khi:
+* xử lý danh sách object theo điều kiện linh hoạt
+* đọc tham số từ `**kwargs`
+* viết hàm filter, search, sort
+* làm việc với reflection / dynamic programming
+
+1. Cú pháp
+
+```python
+getattr(obj, "tên_thuộc_tính", giá_trị_mặc_định)
+```
+
+Ý nghĩa:
+* Trả về giá trị của thuộc tính "`tên_thuộc_tính`"
+* Nếu thuộc tính không tồn tại => trả về `giá_trị_mặc_định` (hoặc `raise AttributeError` nếu không truyền default)
+
+2. Cách dùng
+
+```python
+staff = Staff("An", 20, hobby="gaming", city="DN")
+print(getattr(staff, "name"))
+print(getattr(staff, "extra"))
+```
+
+3. Xử lý khi thuộc tính không tồn tại
+
+* Nếu không cung cấp default, Python sẽ báo lỗi:
+
+```python
+# AttributeError: 'Staff' object has no attribute 'salary'
+print(getattr(staff, "salary"))
+```
+
+* Truyền default để xử lý khi thuộc tính không tồn tại:
+
+```python
+print(getattr(staff, "salary", "Không có lương"))
+```
 
 ---
 
 ## 5.9 Thực hành OOP thiết yếu
 
-### BTTH16 – Class Student cơ bản
+### BTTH7: Xây dựng class Product và danh sách sản phẩm
 
-Yêu cầu:
+Yêu cầu: Tạo class `Product` với các thuộc tính:
+* `name: str`
+* `price: float`
+* `quantity: int`
 
-1. Tạo class `Student` với các thuộc tính: `name`, `age`, `score`.
-2. Thêm method:
+Thực hiện:
+1. Viết phương thức cho class `Product`:
+   * `get_total()`: trả về tổng giá trị sản phẩm (`price * quantity`)
+   * `is_out_of_stock()`: trả về `True` nếu `quantity = 0`
 
-   * `is_passed()` → trả về True nếu score ≥ 5
-   * `introduce()` → in giới thiệu đơn giản.
-3. Tạo 3 object Student và gọi thử các method.
+2. Viết `__str__` để in theo format:
+`Sữa tươi – 25.5 usd – SL: 10 – Tổng: 255 usd`
 
----
+3. Tạo danh sách sản phẩm:
 
-### BTTH17 – Danh sách sinh viên & xử lý
-
-Dựa trên class `Student` ở BTTH16:
-
-1. Tạo list `students` chứa 5 sinh viên.
-2. Viết hàm:
-
-   * `print_all(students)` → in thông tin tất cả sinh viên
-   * `get_avg_score(students)` → trả về điểm trung bình
-   * `get_top_student(students)` → trả về sinh viên có score cao nhất
-3. Gọi các hàm trên để test.
-
----
-
-### BTTH18 – Class BankAccount với đóng gói
-
-Thiết kế class `BankAccount`:
-
-* Thuộc tính: `owner`, `_balance` (mặc định = 0)
-* Method:
-
-  * `deposit(amount)` → nạp tiền, amount phải > 0
-  * `withdraw(amount)` → rút tiền, không cho phép rút quá số dư
-  * `get_balance()` → trả về số dư hiện tại
-
-Viết chương trình demo:
-
-* Tạo 1 tài khoản
-* Nạp tiền, rút tiền, in số dư sau mỗi lần.
-
----
-
-### BTTH19 – Dùng `__str__` để debug
-
-Thêm `__str__` cho `Student` hoặc `BankAccount` để khi `print(object)` sẽ in ra thông tin rõ ràng.
-
-Ví dụ mong muốn:
-
-```text
-Student(name=An, age=20, score=8.5)
-BankAccount(owner=An, balance=1200)
+```python
+products = [
+    Product("Sữa tươi", 25.5, 10),
+    Product("Bánh mì", 12.0, 0),
+    Product("Cà phê", 18.5, 5),
+]
 ```
 
----
+4. Viết hàm trả về tổng tiền toàn bộ kho: 
+`def calc_inventory_value(products: list[Product]) -> float:`
 
-### BTTH20 – Bài tập mở rộng (tuỳ thời gian)
+5. Tìm sản phẩm có total value cao nhất
 
-Thiết kế class `Course`:
+### BTTH8: Tăng cường Encapsulation với @property
 
-* Thuộc tính: `name`, `students` (list[Student])
-* Method:
+Yêu cầu: Tạo class `Employee`:
+* `_name: str`
+* `_salary: float`
+* `_bonus_rate: float` (tỉ lệ thưởng, mặc định = 0.1)
 
-  * `add_student(student)`
-  * `get_avg_score()` → điểm trung bình của khoá học
-  * `get_top_student()` → sinh viên điểm cao nhất
+Hãy viết:
+1. Getter + setter cho `salary`
+    * Nếu lương < 0 => `raise ValueError`
 
-Viết chương trình demo:
+2. Getter + setter cho `bonus_rate`
+   * Phải nằm trong khoảng từ 0 đến 1
 
-* Tạo vài Student
-* Thêm vào Course
-* In điểm trung bình và sinh viên có điểm cao nhất.
+3. Thêm method cho class `Employee`:
 
----
+```python
+def total_income(self) -> float:
+    return self.salary + self.salary * self.bonus_rate
+```
 
-## 5.10 Kết luận phần OOP thiết yếu
+4. Viết `__repr__` để dễ debug:
+`Employee(name='An', salary=1000, bonus_rate=0.1)`
 
-Sau phần này, học viên cần:
+### BTTH9: Ứng dụng `*args` và `**kwargs` trong thiết kế class
 
-* Hiểu rõ khái niệm **class** và **object**
-* Biết định nghĩa `__init__`, dùng `self`, tạo attributes & methods
-* Biết dùng list các object và viết hàm xử lý danh sách đó
-* Nắm khái niệm đóng gói cơ bản, hiểu quy ước `_attribute`
-* Biết dùng `__str__` để hỗ trợ debug/log
-* Bắt đầu làm quen với `*args`, `**kwargs` trong method/constructor
+Cho trước class `Person`:
 
-> Đây là nền tảng để sang các buổi sau dùng OOP cho FastAPI (models, schemas, services, …) một cách tự nhiên.
+```python
+class Person:
+    def __init__(self, name, age, income, **kwargs):
+        self._name = name
+        self._age = age
+        self._income = income
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def age(self):
+        return self._age
+
+    @age.setter
+    def age(self, value):
+        if value < 0:
+            raise ValueError("Age must be non-negative")
+        self._age = value
+
+    @property
+    def income(self):
+        return self._income
+
+    def __str__(self):
+        return f"{self.name} ({self.age} tuổi) - Thu nhập: {self.income} usd/tháng"
+
+    def __repr__(self):
+        return f"Person(name={self.name!r}, age={self.age}, income={self.income})"
+```
+
+Yêu cầu: 
+1. Tạo class `Community` để quản lý danh sách người trong một cộng đồng
+    * Constructor cho phép truyền bất kỳ số lượng Person:
+
+```python
+class Community:
+    def __init__(self, *people: Person):
+        self.people: list[Person] = list(people)
+
+    def add_person(self, person: Person) -> None:
+        self.people.append(person)
+
+    def __str__(self) -> str:
+        if not self.people:
+            return "Cộng đồng hiện chưa có ai"
+
+        lines = [f"Cộng đồng có {len(self.people)} người:"]
+        for p in self.people:
+            lines.append(f"- {p}")
+        return "\n".join(lines)
+```
+
+Dùng thử:
+
+```python
+p1 = Person("An", 20, 1000)
+p2 = Person("Binh", 30, 2500)
+p3 = Person("Chi", 20, 1800)
+
+comm = Community(p1, p2, p3)
+print(comm)
+```
+
+2. Viết method `find(**conditions)` cho class `Community` để tìm người theo điều kiện linh hoạt
+    * Trả về list các `Person` thỏa tất cả điều kiện được truyền vào
+    * Sử dụng `getattr()` để lấy attribute động
+
+Ví dụ:
+
+```python
+comm.find(name="An")
+comm.find(age=22)
+comm.find(income=2500)
+comm.find(name="An", age=20)
+```

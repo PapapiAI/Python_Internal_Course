@@ -1,5 +1,5 @@
 class Person:
-    def __init__(self, name, age, income):
+    def __init__(self, name, age, income, **kwargs):
         self._name = name
         self._age = age
         self._income = income
