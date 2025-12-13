@@ -1,6 +1,6 @@
 # Buổi 4 – FastAPI Fundamentals
 
-## 1) Kiến trúc Web: Client–Server, HTTP lifecycle, REST stateless
+## 1) Kiến trúc Web: Client–Server, HTTP lifecycle, REST stateless, MVC
 
 ## 1.1 Client–Server
 
@@ -16,7 +16,7 @@
 
 1. Client tạo request (method, URL, headers, query/path params, body JSON)
 2. Request đến FastAPI (chạy trên `uvicorn`)
-3. FastAPI xử lý theo pipeline (thực tế khi tổ chức theo MVC/service-layer):
+3. FastAPI xử lý theo pipeline MVC/service-layer:
    * Middleware (logging, CORS, auth, timing, ...)
    * Router / Controller (endpoint: `@router.get`, `@router.post`, ...)
    * Dependency Injection (`Depends(...)`): lấy DB session, auth user, config ...
@@ -69,7 +69,7 @@ Trong FastAPI, mapping trực tiếp:
 | `403 Forbidden`             | Không đủ quyền             | Token hợp lệ nhưng role/permission không cho phép                        |
 | `404 Not Found`             | Không tìm thấy resource    | ID không tồn tại                                                         |
 | `409 Conflict`              | Xung đột/vi phạm ràng buộc | Trùng unique, conflict state                                             |
-| `422 Unprocessable Entity`  | **Validation lỗi**         | Rất phổ biến trong FastAPI khi body/query/path sai kiểu hoặc thiếu field |
+| `422 Unprocessable Entity`  | Validation lỗi             | Rất phổ biến trong FastAPI khi body/query/path sai kiểu hoặc thiếu field |
 | `500 Internal Server Error` | Lỗi server                 | Exception không xử lý                                                    |
 
 > Lưu ý: 
@@ -107,27 +107,110 @@ FastAPI sẽ:
 
 ---
 
+## 1.5 Mô hình MVC trong kiến trúc Web Backend
+
+> MVC (Model – View – Controller) là mô hình kiến trúc dùng để tách biệt trách nhiệm trong ứng dụng web/backend:
+> * Model: Dữ liệu + cấu trúc dữ liệu
+> * View: Dữ liệu trả về cho client 
+> * Controller: Nhận request, điều phối xử lý
+
+Trong FastAPI framework:
+* Không render HTML
+* View = JSON trả về cho client (Web / Mobile)
+* Thường gọi là `MVC + Service Layer`
+
+| Thành phần              | Ý nghĩa         | Thành phần thực tế                                           |
+|-------------------------|-----------------|--------------------------------------------------------------|
+| View                    | JSON Response   | JSON Response                                                |
+| Controller              | API Endpoint    | `APIRouter` / Endpoint (`@router.get`, `@router.post`)       |
+| Model                   | Schema / Entity | Pydantic Model (request/response)<br/> SQLAlchemy Model (DB) |
+| (Service – mở rộng MVC) | Logic nghiệp vụ | custom layer, không phải FastAPI cung cấp sẵn                |
+
+Luồng xử lý chuẩn với `Controller mỏng – Service dày` trong dự án FastAPI thực tế:
+
+```text
+HTTP Request
+  ↓
+Middleware (auth, logging, cors)
+  ↓
+Controller (Router)
+  ↓
+Dependency Injection (DB, current_user)
+  ↓
+Service Layer (business logic)
+  ↓
+Model / Data
+  ↓
+JSON Response
+```
+
+---
+
 ## 2) FastAPI
 
 ## 2.1 Cài đặt FastAPI & Uvicorn
 
-FastAPI không chạy trực tiếp, mà cần một web server trung gian => `uvicorn`
+### 2.1.1: Virtual Environment (.venv)
 
-### Lệnh cài đặt:
+> * `.venv`: môi trường Python riêng cho từng project
+> * Mỗi project có bộ thư viện độc lập
+> * Không ảnh hưởng Python hệ thống
+
+* Tạo `.venv`:
 
 ```bash
-pip install fastapi uvicorn
+    python -m venv .venv
+```
+
+* Kích hoạt `.venv`
+  * Windows: 
+    * PowerShell / CMD: `.\.venv\Scripts\activate`
+    * Git Bash: `source .venv/Scripts/activate`
+  * Linux/Mac: `source .venv/bin/activate`
+
+Sau khi kích hoạt, terminal sẽ có (`.venv`)
+
+* Lưu ý KHÔNG commit `(.venv)`
+  * Không chia sẻ qua Git
+  * Dùng `requirements.txt` để install thư viện
+    * `pip install -r requirements.txt`
+
+Trước đây có `pip` và `pip3` do Python 2/3, nhưng hiện nay dùng `.venv` nên chỉ cần `pip`
+
+### 2.1.2 Cài đặt FastAPI trong .venv:
+
+FastAPI không chạy trực tiếp, mà cần một web server trung gian => `uvicorn`
+
+```bash
+    pip install fastapi uvicorn
 ```
 
 Trong đó:
 * `fastapi`: framework API
 * `uvicorn`: server chạy ứng dụng FastAPI
 
+Tạo / cập nhật file `requirements.txt`:
+* Sau khi đã cài các thư viện cần thiết => chạy lệnh:
+  * `pip freeze > requirements.txt`
+  * Trong đó:
+    * `pip freeze`: tạo danh sách các gói thư viện theo format chuẩn
+    ```text
+        fastapi==0.124.2
+        uvicorn==0.38.0
+        pydantic==2.12.5
+        starlette==0.50.0
+        anyio==4.12.0
+        ...
+    ```
+    * Toán tử `>` (của terminal): chuyển toàn bộ nội dung đó vào file `requirements.txt`
+
+Như vậy các máy của dev khác chỉ cần kích hoạt `.venv` và chạy `pip install -r requirements.txt` để cài toàn bộ thư viện 
+
 ---
 
 ## 2.2 Tạo file main.py
 
-Tạo file **main.py** ở thư mục gốc dự án
+Tạo file `main.py` ở thư mục gốc dự án
 
 ```python
 from fastapi import FastAPI
@@ -139,14 +222,13 @@ def read_root():
     return {"message": "Hello World from FastAPI!"}
 ```
 
-Giải thích từng dòng:
+Trong đó:
+* `from fastapi import FastAPI`: import class FastAPI từ package `fastapi`
+* `app = FastAPI()`: tạo ứng dụng chính
+* `@app.get("/")`: định nghĩa endpoint `GET` tại URL `/`
+* `read_root()`: hàm xử lý request, trả về JSON
 
-* `from fastapi import FastAPI` → import class FastAPI.
-* `app = FastAPI()` → tạo ứng dụng chính.
-* `@app.get("/")` → định nghĩa endpoint GET tại URL `/`.
-* `read_root()` → hàm xử lý request; trả về JSON.
-
-> FastAPI tự động convert Python dict → JSON.
+> FastAPI tự động convert Python dict => JSON
 
 ---
 
@@ -155,101 +237,107 @@ Giải thích từng dòng:
 Trong terminal:
 
 ```bash
-uvicorn main:app --reload
+    uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Giải thích:
+Trong đó:
+* `main`: tên file main.py
+* `app`: biến app = FastAPI()
+* `--reload`: tự reload server khi code thay đổi
 
-* `main` → tên file main.py
-* `app` → biến app = FastAPI()
-* `--reload` → tự reload server khi code thay đổi
+Sau khi chạy, terminal hiện: `Uvicorn running on http://127.0.0.1:8000`
 
-### Sau khi chạy, terminal hiện:
+Truy cập `http://127.0.0.1:8000` => thấy JSON Hello World
 
-```
-Uvicorn running on http://127.0.0.1:8000
-```
+### 2.3.1 FastAPI Dev Mode
 
-Truy cập:
+Ở môi trường local của dev, có thể chạy bằng `fastapi dev main.py`, nhưng KHÔNG dùng khi deploy
+* Là CLI helper của FastAPI
+* Bọc bên ngoài uvicorn
+* Chỉ dùng cho local development
+  * Cần cài đặt "fastapi[standard]": `pip install "fastapi[standard]"`
 
-* [http://127.0.0.1:8000](http://127.0.0.1:8000) → thấy JSON Hello World
+### 2.3.2 Run bằng PyCharm
+
+1. Chọn đúng Python Interpreter (.venv)
+  * Python Interpreter => Add Interpreter => Chọn 'select existing interpreter'
+  * Python path: (cuối path)
+    * Windows: `.venv\Scripts\python.exe`
+    * macOS/Linux: `.venv/bin/python`
+
+2. Tạo Run Configuration cho FastAPI
+  * Cấu hình các trường
+    * Name: tùy ý (ví dụ: FastAPI)
+    * Python interpreter: kiểm tra path đã trỏ đúng (.venv)
+    * Module: `uvicorn`
+    * Parameters: `main:app --host 127.0.0.1 --port 8000 --reload`
+    * Working directory: thư mục project
 
 ---
 
-## 2.4 Documentation tự động – Swagger UI & ReDoc
+## 2.4 Documentation tự động: Swagger UI & ReDoc
 
-FastAPI tự sinh UI test API:
-
+FastAPI tự generate UI để test API:
 * Swagger UI: `http://127.0.0.1:8000/docs`
 * ReDoc: `http://127.0.0.1:8000/redoc`
 
-> Đây là lý do FastAPI rất mạnh: chỉ cần viết code, tài liệu API tự sinh chuẩn OpenAPI.
-
-### Ví dụ giao diện Swagger:
-
-* Thấy danh sách endpoint
-* Nhấn vào endpoint `/` → Try it out → Execute → thấy response JSON
+> Đây là lý do FastAPI rất mạnh: chỉ cần viết code, tài liệu API tự sinh theo chuẩn OpenAPI
 
 ---
 
-## 2.5 Thử tạo thêm endpoint Hello với tên người dùng
+## 2.5 Demo một số endpoint
 
 Thêm vào main.py:
 
 ```python
 @app.get("/hello/{name}")
-def say_hello(name: str):
+def say_hello(name: str) -> dict[str, str]:
     return {"message": f"Hello {name}!"}
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+
+
+# Thêm mã lỗi 400 trên Swagger UI
+@app.get("/calculate/sum",
+         responses={
+             400: {"model": ErrorResponse, "description": "Business validation error"}
+         })
+def calculate_sum(a: int, b: int) -> dict[str, int]:
+    if a < 0 or b < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Negative numbers are not allowed")
+
+    return {
+        "a": a,
+        "b": b,
+        "sum": a + b
+    }
 ```
 
-Truy cập:
-
-```
-http://127.0.0.1:8000/hello/Thien
-```
-
-Kết quả:
-
-```json
-{"message": "Hello Thien!"}
-```
-
-> FastAPI tự parse kiểu dữ liệu → `name: str`.
+> FastAPI tự parse kiểu dữ liệu => `name: str`
 
 ---
 
-## 2.6 Giải thích sâu hơn về Path Operation Decorator
+## 2.6 Path Operation Decorator
 
-Dòng:
+> Dòng `@app.get("/")` là Path Operation Decorator
 
-```python
-@app.get("/")
-```
-
-Gọi là **Path Operation Decorator**.
-Trong FastAPI, mỗi endpoint = method HTTP + path.
-
-Ví dụ:
-
-* `@app.get("/")`
-* `@app.post("/items")`
-* `@app.put("/users/{user_id}")`
-
-FastAPI dùng decorator để gắn hàm xử lý request.
+* Trong FastAPI, mỗi endpoint = method HTTP + path
+* Ví dụ:
+  * `@app.get("/")`
+  * `@app.post("/items")`
+  * `@app.put("/users/{user_id}")`
+* FastAPI dùng decorator để gắn hàm xử lý request
 
 ---
 
 ## 2.7 Response tự động thành JSON
 
-Trong FastAPI, chỉ cần return:
-
-* dict
-* list
-* str
-* int
-* boolean
-
-FastAPI + Pydantic tự convert thành JSON.
+> Trong FastAPI, chỉ cần return `dict`, `list`, `str`, `int`, `boolean`
+> => FastAPI + Pydantic tự convert thành JSON
 
 Ví dụ:
 
@@ -268,233 +356,284 @@ Kết quả JSON:
 
 ---
 
-## 2.8 Thực hành
+# 3) Path & Query Parameters
 
-### BTTH1 – Tạo ứng dụng FastAPI đầu tiên
+> Trong FastAPI, **tham số từ URL** là một trong những cách quan trọng nhất để API nhận dữ liệu từ client <br>
+> FastAPI hỗ trợ lấy dữ liệu từ URL theo hai dạng chính:
 
-Yêu cầu:
-
-1. Tạo file main.py
-2. Tạo endpoint GET `/` trả về `{ "message": "Hello FastAPI" }`
-3. Chạy server bằng `uvicorn main:app --reload`
-4. Truy cập Swagger UI để test
-
----
-
-### BTTH2 – Tạo endpoint với tên người dùng
-
-Tạo endpoint:
-
-```
-GET /welcome/{name}
-```
-
-Trả về JSON:
-
-```json
-{ "welcome": "Xin chào {name}" }
-```
-
----
-
-### BTTH3 – Tạo endpoint trả về thời gian hiện tại
-
-1. Import datetime
-2. Tạo endpoint `/now`
-3. Trả về JSON dạng:
-
-```json
-{
-  "timestamp": "2025-01-01 10:20:30"
-}
-```
-
-> Gợi ý: dùng `strftime` để format thời gian.
-
----
-
-## 2.9 Kết luận phần Hello World
-
-Học viên cần nắm được:
-
-* Cách cài đặt FastAPI & Uvicorn
-* Cách tạo file main.py và định nghĩa endpoint đầu tiên
-* Cách chạy server với chế độ reload
-* Biết sử dụng `/docs` để test API ngay lập tức
-* Hiểu cách FastAPI tự convert JSON
-
-> Đây là nền tảng để sang phần tiếp theo: **Path Parameters, Query Parameters, Request Body (Pydantic)** và CRUD API.
-
----
-
-# 3) Path & Query Parameters (Chi tiết)
-
-FastAPI hỗ trợ lấy dữ liệu từ URL theo hai dạng chính:
-
-* **Path Parameters** → nằm trong URL, bắt buộc
-* **Query Parameters** → sau dấu `?`, không bắt buộc (hoặc có giá trị mặc định)
+| Loại               | Vị trí        | Bắt buộc       | Mục đích sử dụng                    |
+|--------------------|---------------|----------------|-------------------------------------|
+| `Path Parameters`  | Nằm trong URL | Bắt buộc       | Xác định đối tượng cụ thể           |
+| `Query Parameters` | Sau dấu `?`   | Không bắt buộc | Lọc, tìm kiếm, phân trang, tuỳ chọn |
 
 ---
 
 ## 3.1 Path Parameters
 
-Dùng để định nghĩa phần **thay đổi** trong URL.
+> Path Parameter là phần **biến động** của URL, dùng để xác định tài nguyên cụ thể
 
-Ví dụ:
+* Ví dụ:
+  * `/items/10`
+  * `/users/3/orders/A001`
+
+Trong đó `10`, `3`, `A001` chính là path parameters
+
+### 3.1.1 Cú pháp
+
+`{item_id}` trong URL **phải trùng tên** với tham số trong hàm
 
 ```python
 @app.get("/items/{item_id}")
-def get_item(item_id: int):
+def get_item(item_id: int) -> dict[str, int]:
     return {"item_id": item_id}
 ```
 
-Truy cập:
-
-```
-http://127.0.0.1:8000/items/10
-```
-
-Kết quả:
+Kết quả trả về:
 
 ```json
 { "item_id": 10 }
 ```
 
-### Giải thích:
+### 3.1.2 Thông tin chi tiết
 
-* `{item_id}` là path param
-* FastAPI tự convert kiểu nhờ annotation `item_id: int`
-* Nếu truyền sai kiểu → FastAPI tự trả lỗi 422
+> `{item_id}` là path param
 
-Ví dụ 2 – nhiều tham số:
+FastAPI tự thực hiện:
+* Tự động parse theo type hint `item_id: int`, `-> dict[str, int]`
+* Tự validate dữ liệu
+* Tự generate Swagger UI
+  * Nếu truyền sai kiểu => FastAPI tự trả lỗi 422 => không cần viết code validate thủ công
+  ```json
+    {
+      "detail": [
+        {
+          "loc": ["path", "item_id"],
+          "msg": "Input should be a valid integer",
+          "type": "int_parsing"
+        }
+      ]
+    }
+  ```
+
+### 3.1.3 Nhiều tham số `/users/5/orders/ORD001`
+
+Thứ tự trong URL phải đúng như định nghĩa route:
 
 ```python
 @app.get("/users/{user_id}/orders/{order_id}")
-def get_order(user_id: int, order_id: str):
+def get_order(user_id: int, order_id: str) -> dict[str, int | str]:
     return {"user": user_id, "order": order_id}
 ```
+
+Kết quả:
+
+```json
+{
+  "user_id": 5,
+  "order_id": "ORD001"
+}
+```
+
+Lưu ý nếu khai báo sai kiểu trả về `-> dict[str, str]` 
+=> FastAPI ném lỗi `ResponseValidationError: 1 validation error: ...`
+
+Path parameter luôn dùng để định danh tài nguyên trong RESTful API:
+* `/users/1`: Lấy user có `id = 1`
+* `/users/5/orders/ORD001`: Lấy đơn hàng cụ thể của user cụ thể
 
 ---
 
 ## 3.2 Query Parameters
 
-Nằm sau dấu `?` trong URL.
+Query Parameters là các tham số nằm sau dấu `?`, thường dùng cho:
+* Tìm kiếm
+* Lọc
+* Sắp xếp
+* Phân trang
+* Tuỳ chọn hiển thị
 
-Ví dụ:
+Ví dụ: `/search?keyword=python&limit=5`
+
+### 3.1.1 Cú pháp
 
 ```python
 @app.get("/search")
 def search(keyword: str, limit: int = 10):
-    return {"keyword": keyword, "limit": limit}
+    return {
+        "keyword": keyword,
+        "limit": limit
+    }
 ```
 
-Truy cập:
+Kết quả:
 
-```
-http://127.0.0.1:8000/search?keyword=python&limit=5
-```
-
-### Tham số có giá trị mặc định
-
-Nếu không truyền `limit`, sẽ dùng giá trị mặc định 10.
-
-```
-/search?keyword=fastapi
+```json
+{
+  "keyword": "python",
+  "limit": 5
+}
 ```
 
-### Query param không bắt buộc
+### 3.1.2 Giá trị mặc định
+
+```python
+def search(keyword: str, limit: int = 10)
+```
+
+* `keyword`: bắt buộc
+* `limit`: không bắt buộc
+  * Nếu không truyền `limit`, sẽ dùng giá trị mặc định 10
+
+FastAPI tự dùng giá trị mặc định khi gọi `/search?keyword=fastapi`:
+
+```json
+{
+  "keyword": "fastapi",
+  "limit": 10
+}
+```
+
+### 3.1.3 Query param không bắt buộc (Optional)
 
 ```python
 @app.get("/filter")
-def filter_items(category: str | None = None):
-    return {"category": category}
+def filter_items(
+        category: str | None = None,
+        active: bool | None = None
+) -> dict[str, str | bool | None]:
+    return {
+        "category": category,
+        "active": active
+    }
 ```
+
+Trong đó:
+* `str | None = None`: tương đương cách viết cũ `Optional[str] = None`
+* `= None`: FastAPI hiểu là tham số không bắt buộc
+  * Khi client không truyền param `GET /filter` => trả response `{"category": null, "active": null}`
+* Cách dùng SAI: Không có `= None` => FastAPI coi là bắt buộc
+  * Khi gọi `GET /filter` => trả lỗi 422 với `"msg": "Field required"`
 
 ---
 
 ## 3.3 Kết hợp Path + Query Parameters
 
+> Patern này rất phổ biến trong dự án thực tế
+
+Quy tắc:
+* `Path param`: luôn bắt buộc
+* `Query param`: tuỳ chọn, có default
+
 ```python
 @app.get("/products/{product_id}")
-def get_product(product_id: int, detailed: bool = False):
+def get_product(
+        product_id: int,
+        price_filter: float | None = None,
+        detailed: bool = False
+) -> dict[str, int | float | bool | None]:
     return {
         "id": product_id,
+        "price": price_filter,
         "detailed": detailed
     }
 ```
 
-Ví dụ URL:
+---
 
-```
-/products/8?detailed=true
-```
+## 3.4 Best Practices quan trọng
+
+* Điều nên làm:
+  * Dùng Path param cho `id`
+  * Dùng Query param cho filter/search
+  * Đặt type hint rõ ràng
+  * Có default value cho query
+* KHÔNG nên:
+  * Dùng query để thay thế path id
+  * Viết validate kiểu dữ liệu thủ công
+  * Dùng `str` cho mọi tham số
 
 ---
 
-## 3.4 Thực hành (BTTH)
+# 4) Pydantic Model: Request & Response
 
-### BTTH4 – Viết endpoint lấy thông tin sách
+> Trong FastAPI, Pydantic là trung tâm của việc validate dữ liệu<br>
+> Pydantic sẽ validate dữ liệu vào (request body) và chuẩn hóa dữ liệu ra (response)
 
-```
-GET /books/{book_id}?include_author=true
-```
+## 4.1 Bản chất Pydantic Model
 
-Trả về JSON:
+Là class Python mô tả cấu trúc dữ liệu, dùng để:
+* Kiểm tra dữ liệu đầu vào (type validation)
+* Chuẩn hóa dữ liệu request / response
+* Tự động tạo tài liệu OpenAPI / Swagger schema
 
-```json
-{
-  "id": 123,
-  "include_author": true
-}
-```
-
----
-
-### BTTH5 – Endpoint tìm kiếm người dùng
-
-```
-GET /users?name=an&age=20
-```
-
-Trả về đúng 2 tham số.
-
----
-
-# 4) Pydantic Model – Request & Response
-
-FastAPI dùng **Pydantic** để validate dữ liệu vào (request body) và chuẩn hóa dữ liệu ra (response).
-
----
-
-## 4.1 Pydantic Model là gì?
-
-Là class mô tả cấu trúc dữ liệu, dùng để:
-
-* Kiểm tra dữ liệu đầu vào (validation)
-* Gắn kiểu dữ liệu
-* Tự động tạo tài liệu API
-
-Ví dụ model User:
-
-```python
-from pydantic import BaseModel
-
-class User(BaseModel):
-    name: str
-    age: int
-```
-
----
-
-## 4.2 Request Body – POST tạo mới dữ liệu
+## 4.2 Tại sao Controller KHÔNG nên dùng dict cho request body
 
 ```python
 @app.post("/users")
-def create_user(user: User):
+def create_user(user: dict):
     return user
 ```
 
-Gửi request body JSON:
+### 4.2.1 Vấn đề
+
+* Không validate kiểu
+* Không biết field nào bắt buộc
+* Swagger không rõ ràng
+* Lỗi chỉ xuất hiện lúc runtime
+
+### 4.2.2 Patern chuẩn với Pydantic
+
+Controller nhận Pydantic Model:
+
+```python
+from fastapi import APIRouter
+from schemas.request.user_schema import UserCreate
+
+user_router = APIRouter()
+
+
+@user_router.post("/users")
+def create_user(user: UserCreate):
+    return user
+```
+
+```python
+# main.py
+from fastapi import FastAPI
+from controllers.user_controller import user_router
+
+app = FastAPI()
+
+# Đăng ký router
+app.include_router(user_router, prefix="/users", tags=["Users"])
+```
+
+FastAPI lúc này:
+* Validate tự động
+* Trả lỗi 422 nếu sai
+* Tạo Swagger rõ ràng
+* Code clean
+
+---
+
+## 4.2 Request Schema: Dữ liệu client gửi lên
+
+Sử dụng `BaseModel` của Pydantic cho request schema để tự động:
+* Validate dữ liệu (nếu sai => 422)
+* Parse JSON => object `User`
+* Generate schema (OpenAPI/Swagger)
+
+```python
+# schemas/request/user_schema.py
+from pydantic import BaseModel
+
+class UserCreate(BaseModel):
+    name: str
+    age: int
+    address: str | None = None
+```
+
+Client gửi request body JSON (`address` là optional):
 
 ```json
 {
@@ -511,414 +650,234 @@ FastAPI tự:
 
 ---
 
-## 4.3 Response Model – Chuẩn hóa dữ liệu trả về
+## 4.3 Response Schema: Chuẩn hóa dữ liệu trả về (View)
+
+> Dùng Response Schema để tránh lộ dữ liệu các field nhạy cảm trong DB model như `password`
+
+### 4.3.1 Cách làm SAI
 
 ```python
+return {
+    "id": 1,
+    "name": "An",
+    "age": 20,
+    "password": "123456"
+}
+```
+
+### 4.3.2 Patter chuẩn
+
+Định nghĩa Response Schema: 
+
+```python
+# schemas/response/user_out_schema.py
+from pydantic import BaseModel
+
+# Ví dụ ko muốn lộ address
 class UserOut(BaseModel):
+    id: int
     name: str
     age: int
-    is_adult: bool
+```
 
-@app.post("/users", response_model=UserOut)
-def create_user(user: User):
+Đối với dự án lớn có thể tạo `BaseOutSchema` với mục đích:
+* chứa field chung
+* config chung
+
+```python
+from pydantic import BaseModel
+
+class BaseOutSchema(BaseModel):
+    id: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+```
+
+```python
+class UserOut(BaseOutSchema):
+    name: str
+    age: int
+```
+
+Tạo ErrorResponse để trả lỗi:
+
+```python
+# schemas/response/error_response.py
+from pydantic import BaseModel
+
+class ErrorResponse(BaseModel):
+    detail: str
+```
+
+---
+
+## 4.4 Controller: Nhận Request và trả Response bằng Pydantic
+
+Controller mỏng:
+* Không kiểm tra logic nghiệp vụ `age`
+* Không validate kiểu
+* Chỉ nhận request schema => gọi service => trả response schema 
+
+```python
+# controllers/user_controller.py
+from fastapi import APIRouter
+from schemas.request.user_schema import UserCreate
+from schemas.response.error_response import ErrorResponse
+from schemas.response.user_out_schema import UserOut
+from services import user_service
+
+user_router = APIRouter()
+
+
+@user_router.post(
+    "",
+    status_code=201,
+    response_model=UserOut,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid input on business logic"}
+    },
+)
+def create_user(user: UserCreate) -> UserOut:
+    return user_service.create_user(user)
+```
+
+---
+
+## 4.5 Service: Xử lý nghiệp vụ (KHÔNG dùng Pydantic để validate)
+
+Flow xử lý service:
+* Tin rằng dữ liệu đã đúng kiểu
+* Chỉ xử lý logic nghiệp vụ
+* Không cần biết gì về HTTP / status code
+
+```python
+# services/user_service.py
+from fastapi import HTTPException
+from schemas.request.user_schema import UserCreate
+from schemas.response.user_out_schema import UserOut
+
+_users: list[dict] = []
+_id_counter = 1
+
+
+def create_user(user: UserCreate) -> UserOut:
+    global _id_counter
+
+    # Validation nghiệp vụ (khác với validation kiểu dữ liệu của Pydantic)
+    if user.age < 18:
+        # Tạm sử dụng HTTPException của FastAPI, buổi sau tự tạo Custom Exception
+        raise HTTPException(status_code=400, detail="Age must be >= 18")
+
+    stored_user = {
+        "id": _id_counter,
+        "name": user.name,
+        "age": user.age,
+        "address": user.address,  # lưu nội bộ, nhưng không trả ra UserOut
+    }
+
+    _users.append(stored_user)
+    _id_counter += 1
+
     return UserOut(
-        name=user.name,
-        age=user.age,
-        is_adult=user.age >= 18,
+        id=stored_user["id"],
+        name=stored_user["name"],
+        age=stored_user["age"],
     )
 ```
 
-> response_model giúp API luôn trả về dữ liệu đúng format.
-
 ---
 
-## 4.4 Thêm giá trị mặc định & kiểm tra nâng cao
+## 4.6 Validation nâng cao trong Schema
 
-```python
-class Product(BaseModel):
-    name: str
-    price: float
-    in_stock: bool = True
-```
-
-Pydantic hỗ trợ kiểm tra nâng cao bằng Field:
-
-```python
-from pydantic import Field
-
-class Student(BaseModel):
-    name: str
-    score: float = Field(..., ge=0, le=10)
-```
-
-`score` phải nằm từ **0 đến 10**.
-
----
-
-## 4.5 Thực hành Pydantic (BTTH)
-
-### BTTH6 – Tạo model Book
-
-Thuộc tính:
-
-* title: str
-* author: str
-* year: int
-
-Tạo endpoint POST `/books` nhận Book và trả lại Book.
-
----
-
-### BTTH7 – Tạo response model cho Product
-
-`ProductOut` có thêm trường `price_with_vat`.
-
----
-
-# 5) In-memory CRUD API (Cực kỳ quan trọng)
-
-Mục tiêu:
-
-* Hiểu rõ cách CRUD hoạt động trong API.
-* Quản lý dữ liệu trong RAM bằng list.
-* Đây là nền để học CRUD với database ở Buổi 5.
-
----
-
-## 5.1 Khởi tạo dữ liệu trong bộ nhớ
-
-```python
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-app = FastAPI()
-
-class Item(BaseModel):
-    id: int
-    name: str
-    price: float
-
-items: list[Item] = []  # database tạm
-```
-
----
-
-## 5.2 Create – POST /items
-
-```python
-@app.post("/items")
-def create_item(item: Item):
-    items.append(item)
-    return item
-```
-
----
-
-## 5.3 Read – GET /items
-
-```python
-@app.get("/items")
-def get_all_items():
-    return items
-```
-
-Read by ID:
-
-```python
-@app.get("/items/{item_id}")
-def get_item(item_id: int):
-    for item in items:
-        if item.id == item_id:
-            return item
-    return {"error": "Item not found"}
-```
-
----
-
-## 5.4 Update – PUT /items/{item_id}
-
-```python
-@app.put("/items/{item_id}")
-def update_item(item_id: int, new_item: Item):
-    for i, old_item in enumerate(items):
-        if old_item.id == item_id:
-            items[i] = new_item
-            return new_item
-    return {"error": "Item not found"}
-```
-
----
-
-## 5.5 Delete – DELETE /items/{item_id}
-
-```python
-@app.delete("/items/{item_id}")
-def delete_item(item_id: int):
-    for i, item in enumerate(items):
-        if item.id == item_id:
-            items.pop(i)
-            return {"deleted": item_id}
-    return {"error": "Item not found"}
-```
-
----
-
-## 5.6 Thực hành CRUD (BTTH)
-
-### BTTH8 – CRUD Student
-
-Model:
-
-```python
-class Student(BaseModel):
-    id: int
-    name: str
-    score: float
-```
-
-Yêu cầu:
-
-* POST /students
-* GET /students
-* GET /students/{id}
-* PUT /students/{id}
-* DELETE /students/{id}
-
----
-
-### BTTH9 – CRUD Todo đơn giản
-
-Model:
-
-```python
-class Todo(BaseModel):
-    id: int
-    task: str
-    done: bool = False
-```
-
-API tương tự CRUD Item.
-
----
-
-## 5.7 Tổng kết phần CRUD
-
-Học viên cần nắm:
-
-* Cấu trúc CRUD chuẩn của API
-* Cách lưu trữ tạm bằng list (in-memory)
-* Flow xử lý Request → Validate → CRUD → Response
-* Chuẩn bị sẵn kiến thức để chuyển sang CRUD với database ở Buổi 5
-
----
-
-## 5) In-memory CRUD API theo mô hình MVC (VIẾT LẠI TOÀN BỘ)
-
-> Phần này được viết lại **theo tư duy MVC** để học viên hiểu đúng kiến trúc backend và chuẩn bị trực tiếp cho **Buổi 5: FastAPI + Database**.
+> Validation cơ bản:
+> * Kiểm tra kiểu dữ liệu (`int`, `str`, ...)
+> * Kiểm tra bắt buộc / optional
 >
-> Lưu ý:
->
-> * **Chưa dùng database**
-> * Dữ liệu vẫn lưu trong bộ nhớ (list)
-> * Nhưng **tách rõ vai trò: Model – Service – Controller**
+> Validation nâng cao:
+> * Kiểm tra ràng buộc dữ liệu (constraints), logic liên quan giữa các field, và custom rule, không chỉ là type
 
----
+### 4.6.1 Validation bằng Field (ràng buộc 1 field)
 
-### 5.1 Tổng quan MVC trong FastAPI
-
-MVC (Model – View – Controller) là mô hình kiến trúc kinh điển của backend.
-
-Ánh xạ MVC trong FastAPI:
-
-| MVC        | Trong FastAPI                                       |
-| ---------- | --------------------------------------------------- |
-| Model      | Pydantic Model (Buổi 4) / SQLAlchemy Model (Buổi 5) |
-| Controller | APIRouter (Endpoint)                                |
-| Service    | Business Logic                                      |
-| View       | JSON Response                                       |
-
-> FastAPI không ép MVC, nhưng **dự án thực tế luôn tổ chức theo tư duy này**.
-
----
-
-### 5.2 Cấu trúc thư mục (MVC giản lược)
-
-```text
-app/
-│
-├── main.py              # Entry point
-│
-├── models/
-│   └── item.py          # Model (Pydantic)
-│
-├── services/
-│   └── item_service.py  # Business logic (CRUD)
-│
-├── routers/
-│   └── items.py         # Controller (API endpoints)
-```
-
----
-
-### 5.3 Model – Dữ liệu (M trong MVC)
-
-File: `models/item.py`
+1. Giới hạn số
 
 ```python
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-class Item(BaseModel):
-    id: int
-    name: str
-    price: float
+class UserCreate(BaseModel):
+    age: int = Field(ge=0, le=120)
 ```
 
-Giải thích:
+* `gt=0`: > 0
+* `ge=0`: >= 0
+* `le=120`: <= 120
 
-* Model mô tả **cấu trúc dữ liệu**
-* Không chứa logic HTTP
-* Buổi 5: tách thành `schemas` và `models` (SQLAlchemy)
-
----
-
-### 5.4 Service – Xử lý nghiệp vụ
-
-File: `services/item_service.py`
+2. Chuỗi: độ dài, regex
 
 ```python
-from models.item import Item
-
-_items: list[Item] = []  # In-memory database
-
-
-def create_item(item: Item) -> Item:
-    _items.append(item)
-    return item
-
-
-def get_all_items() -> list[Item]:
-    return _items
-
-
-def get_item_by_id(item_id: int) -> Item | None:
-    for item in _items:
-        if item.id == item_id:
-            return item
-    return None
-
-
-def update_item(item_id: int, new_item: Item) -> Item | None:
-    for i, item in enumerate(_items):
-        if item.id == item_id:
-            _items[i] = new_item
-            return new_item
-    return None
-
-
-def delete_item(item_id: int) -> bool:
-    for i, item in enumerate(_items):
-        if item.id == item_id:
-            _items.pop(i)
-            return True
-    return False
+class UserCreate(BaseModel):
+    name: str = Field(
+        min_length=2,
+        max_length=50,
+        pattern=r"^[A-Za-z ]+$",
+        description="User name (2-50 characters) contains only letters",
+        examples=["Taro Kun"]
+    )
+    age: int = Field(ge=0)
+    address: str | None = None
 ```
 
-Giải thích:
+* `description`: mô tả cho Swagger
+* `example`: giá trị example
 
-* Service **không biết gì về HTTP**
-* Chỉ xử lý dữ liệu & nghiệp vụ
-
----
-
-### 5.5 Controller – Router
-
-File: `routers/items.py`
+### 4.6.2 Validation bằng type đặc biệt của Pydantic
 
 ```python
-from fastapi import APIRouter, HTTPException
-from models.item import Item
-from services import item_service
+from pydantic import BaseModel, EmailStr, HttpUrl
 
-router = APIRouter(prefix="/items", tags=["Items"])
-
-@router.post("")
-def create(item: Item):
-    return item_service.create_item(item)
-
-@router.get("")
-def get_all():
-    return item_service.get_all_items()
-
-@router.get("/{item_id}")
-def get_by_id(item_id: int):
-    item = item_service.get_item_by_id(item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return item
-
-@router.put("/{item_id}")
-def update(item_id: int, item: Item):
-    updated = item_service.update_item(item_id, item)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return updated
-
-@router.delete("/{item_id}")
-def delete(item_id: int):
-    success = item_service.delete_item(item_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return {"deleted": item_id}
+class UserOut(BaseModel):
+    email: EmailStr
+    avatar_url: HttpUrl | None = None
 ```
 
----
+### 4.6.3 Custom validation bằng validator
 
-### 5.6 main.py – Kết nối ứng dụng
+1. Validate 1 field bằng `field_validator`
 
 ```python
-from fastapi import FastAPI
-from routers import items
+from pydantic import BaseModel, Field, field_validator
 
-app = FastAPI()
-app.include_router(items.router)
+class UserCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=50)
+    age: int = Field(ge=1, le=150)
+    address: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str):
+        if not v.strip():
+            raise ValueError("Name cannot be empty")
+        return v.strip()
 ```
 
----
+2. Validate nhiều field cùng lúc bằng `model_validator`
 
-### 5.7 Luồng xử lý Request theo MVC
+```python
+from datetime import date
+from pydantic import BaseModel, model_validator
 
-```text
-Client
-  ↓
-Router (Controller)
-  ↓
-Service (Business Logic)
-  ↓
-Model (Data)
-  ↓
-JSON Response
+class BookingCreate(BaseModel):
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def check_date_range(self):
+        if self.start_date >= self.end_date:
+            raise ValueError("end_date must be after start_date")
+        return self
 ```
 
----
-
-### 5.8 Thực hành (BTTH – theo MVC)
-
-**BTTH8 – CRUD Student theo MVC**
-
-* Tạo `Student` model
-* Tạo `student_service.py`
-* Tạo `routers/students.py`
-* Viết CRUD theo đúng MVC
-
----
-
-### 5.9 Kết luận
-
-Sau phần này, học viên cần:
-
-* Hiểu rõ MVC trong FastAPI
-* Phân biệt Controller / Service / Model
-* Viết CRUD in-memory theo kiến trúc chuẩn
-* Sẵn sàng chuyển sang CRUD với Database ở Buổi 5
-
-> Từ đây, học viên đã có **tư duy backend thực tế**, không chỉ là viết endpoint.
+* `mode="before"`: validate ngay khi nhận raw input, dữ liệu chưa parse (thường là dict)
+* `mode="after"` (dùng phổ biến): validate sau khi parse JSON
