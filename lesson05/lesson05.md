@@ -461,7 +461,7 @@ class Student(Base):
 ```
 
 Chú thích:
-* Sử dụng `Mapped[]` và `mapped_column()` theo chuẩn SQLAlchemy 2.0 typing
+* Sử dụng `Mapped[]` và `mapped_column()` theo chuẩn SQLAlchemy 2.0 typing thay cho `Column`
 * `func.now()`: lấy thời gian từ DB server (đảm bảo đồng nhất)
 * `onupdate=func.now()`: tự cập nhật khi record đổi (phù hợp logging audit)
 
@@ -1071,19 +1071,7 @@ Chạy bằng `-m` (module) để import và load đúng file `.venv`:
 
 ---
 
-
-
-## 5) CRUD với DB (get_db → Repository → Service → Router)
-
-> Mục tiêu của phần này:
->
-> * Hiểu **luồng xử lý đầy đủ của 1 request CRUD** trong FastAPI
-> * Biết cách **inject DB session đúng chuẩn** bằng `Depends(get_db)`
-> * Áp dụng **Repository pattern** để tách logic DB
-> * Áp dụng **Service layer** để xử lý nghiệp vụ
-> * Hoàn thiện CRUD API theo kiến trúc clean, dễ mở rộng
-
----
+## 5) Thao tác với DB (Repository => Service => Router)
 
 ### 5.1 Tổng quan luồng xử lý CRUD chuẩn
 
@@ -1091,6 +1079,10 @@ Luồng xử lý cho một request CRUD:
 
 ```
 HTTP Request
+   ↓
+DB Middleware
+  - create Session
+  - attach to request.state
    ↓
 Router (API layer)
    ↓ Depends(get_db)
@@ -1106,41 +1098,97 @@ PostgreSQL
 ```
 
 Nguyên tắc cốt lõi:
-
 * Router **không query DB trực tiếp**
-* Service **không biết HTTP**
+* Service **không cần phải biết HTTP**
 * Repository **không biết request / response**
 
 ---
 
-### 5.2 Dependency Injection DB session (`get_db`)
+### 5.2 Middleware tạo DB session
 
-Tạo file `deps/db.py`:
+Mục đích của DBSessionMiddleware:
+
+> Tạo và quản lý DB Session cho mỗi HTTP request, đảm bảo:
+> * mỗi request có 1 session riêng
+> * commit / rollback tự động
+> * không bị leak connection
 
 ```python
-from typing import Generator
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy.orm import Session
 
 from configs.database import SessionLocal
 
 
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+class DBSessionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        db: Session = SessionLocal()
+        request.state.db = db
+
+        try:
+            response = await call_next(request)
+            db.commit()
+            return response
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 ```
 
-Giải thích:
-
-* `SessionLocal()` tạo **session mới cho mỗi request**
-* `yield` cho FastAPI quản lý lifecycle
-* `finally: close()` đảm bảo không leak connection
+Giải thích chi tiết:
+* `BaseHTTPMiddleware`: DBSessionMiddleware kế thừa class này để:
+  * Middleware chạy trước và sau mỗi request
+  * Áp dụng cho toàn bộ API
+* `db: Session = SessionLocal()`: tạo 1 phiên làm việc với DB
+* `request.state`: mỗi request có session độc lập, không dùng chung
+  * nơi lưu dữ liệu riêng cho request
+  * controller/service có thể truy cập lại bằng `request.state.db`
+* `await call_next(request)`: chuyển request đến bước kế tiếp (middleware tiếp theo => controller)
+* `db.commit()`: nếu không có lỗi => lưu toàn bộ thay đổi vào DB
+* `db.rollback()`: nếu gặp lỗi => huỷ toàn bộ thay đổi trong transaction
 
 ---
 
-### 5.3 Repository layer – truy cập DB
+### 5.3 Đăng ký middleware trong main.py
+
+```python
+from fastapi import FastAPI
+from middlewares.db_session import DBSessionMiddleware
+
+app = FastAPI()
+app.add_middleware(DBSessionMiddleware) # type: ignore[arg-type]
+```
+
+Chú thích:
+* `# type: ignore[arg-type]`: bỏ qua cảnh báo kiểu tham số đối với `add_middleware`
+
+---
+
+### 5.4 Dependency Injection DB session (`get_db`)
+
+Tạo file `dependencies/db.py` để tiêm phụ thuộc:
+
+```python
+from fastapi import Request
+from sqlalchemy.orm import Session
+
+
+def get_db(request: Request) -> Session:
+    return request.state.db
+```
+
+---
+
+
+
+
+
+
+
+
+### 5.5 Repository layer – truy cập DB
 
 Tạo thư mục:
 
