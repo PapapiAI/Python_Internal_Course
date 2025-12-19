@@ -1,5 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from dependencies.db import get_db
 from schemas.request.user_schema import UserCreate
 from schemas.response.error_response import ErrorResponse
 from schemas.response.user_out_schema import UserOut
@@ -16,7 +18,7 @@ user_router = APIRouter()
         400: {"model": ErrorResponse, "description": "Invalid input on business logic"}
     },
 )
-def create_user(user: UserCreate) -> UserOut:
+def create_user(user: UserCreate, db: Session = Depends(get_db)) -> UserOut:
     return user_service.create_user(user)
 
 

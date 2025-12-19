@@ -500,7 +500,7 @@ class Task(Base):
 
 ---
 
-### 2.9 Import models để tạo bảng (chuẩn bị cho bước tạo bảng)
+### 2.9 Import models để tạo bảng
 
 Trong `models/__init__.py`:
 
@@ -1179,28 +1179,63 @@ def get_db(request: Request) -> Session:
     return request.state.db
 ```
 
----
-
-
-
-
-
-
-
-
-### 5.5 Repository layer – truy cập DB
-
-Tạo thư mục:
-
-```
-app/
- ├─ repositories/
- │   └─ student_repository.py
-```
-
-#### 5.3.1 StudentRepository
+Sử dụng trong router:
 
 ```python
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from dependencies.db import get_db
+from schemas.request.user_schema import UserCreate
+from schemas.response.error_response import ErrorResponse
+from schemas.response.user_out_schema import UserOut
+from services import user_service
+
+user_router = APIRouter()
+
+
+@user_router.post(
+    "",
+    status_code=201,
+    response_model=UserOut,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid input on business logic"}
+    },
+)
+def create_user(user: UserCreate, db: Session = Depends(get_db)) -> UserOut:
+    ...
+```
+
+---
+
+### 5.5 Repository layer: truy cập DB
+
+#### 5.5.1 Trách nhiệm của Repository
+
+Repository là tầng truy cập dữ liệu:
+* Chỉ làm việc với SQLAlchemy ORM / SQL
+* Không cần biết HTTP request/response
+* Không xử lý rule nghiệp vụ
+* Không commit/rollback/close session (vì middleware đã quản lý transaction)
+
+> Nguyên tắc: “Repository chỉ query/ghi dữ liệu, không cần quản transaction”
+
+#### 5.5.2 BaseRepository
+
+Tạo BaseRepository chứa CRUD cơ bản để dùng chung cho tất cả repo khác 
+
+```python
+# repositories/base_repository.py
+
+
+```
+
+
+#### 5.5.1 StudentRepository
+
+```python
+# repositories/student_repository.py
+
 from sqlalchemy.orm import Session
 
 from models.student import Student
