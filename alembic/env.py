@@ -5,7 +5,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from configs.database import Base
+from models.base import Base
 from configs.env import settings_config
 
 # IMPORTANT: import all models so Base.metadata is populated

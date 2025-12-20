@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 
-from configs.database import Base
+from models.base import Base
 from models.TimeMixin import TimeMixin
 
 

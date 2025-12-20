@@ -216,10 +216,9 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
-ModelType = TypeVar("ModelType", bound=Base)
 ```
 
-Trong đó:
+Giải thích chi tiết:
 * `create_engine`: quản lý kết nối DB với ứng dụng FastAPI
   * Kết nối đến DB qua `settings.database_url` 
   * `echo=True`: in log SQL ra console (chỉ bật ở DEV)
@@ -238,6 +237,20 @@ Trong đó:
   * Session = 1 phiên làm việc với DB
     * Mỗi request FastAPI sẽ dùng 1 session riêng
     * Tránh chia sẻ session giữa các request
+
+
+Tạo file `models/base.py`:
+
+```python
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    # Base hiện tại chưa cần thêm logic
+    # nhưng bắt buộc phải tồn tại như một lớp con
+    # để SQLAlchemy sử dụng
+    pass
+```
+
 * `Base = declarative_base()`: class cha cho tất cả ORM Models dùng để:
   * Tạo bảng
   * Mapping Python class <=> DB table
@@ -437,7 +450,7 @@ pass
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from configs.database import Base
+from models.base import Base
 
 
 class Student(Base):
@@ -475,7 +488,7 @@ Tạo file `models/task.py` (chuẩn SQLAlchemy thông thường):
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.sql import func
 
-from configs.database import Base
+from models.base import Base
 
 
 class Task(Base):
@@ -524,7 +537,8 @@ Tạo `init_db.py`:
 ```python
 from contextlib import asynccontextmanager
 
-from configs.database import engine, Base
+from configs.database import engine
+from models.base import Base
 import models # đảm bảo models được import để Base.metadata có tables
 
 @asynccontextmanager
@@ -671,6 +685,27 @@ class StudentOut(BaseModel):
     full_name: str
     age: int
     email: EmailStr
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        # Cho phép map trực tiếp từ SQLAlchemy ORM object
+        from_attributes = True
+```
+
+Tạo file `schemas/response/student_out_schema.py`:
+
+```python
+from datetime import datetime
+from pydantic import BaseModel, EmailStr
+
+
+class StudentOut(BaseModel):
+    id: int
+    full_name: str
+    age: int
+    email: EmailStr
+    phone_number: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -865,7 +900,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-from configs.database import Base
+from models.base import Base
 from configs.env import settings_config
 
 # IMPORTANT: import all models so Base.metadata is populated
@@ -1222,163 +1257,655 @@ Repository là tầng truy cập dữ liệu:
 
 #### 5.5.2 BaseRepository
 
-Tạo BaseRepository chứa CRUD cơ bản để dùng chung cho tất cả repo khác 
+Tạo BaseRepository chứa CRUD cơ bản để dùng chung cho tất cả repo khác:
 
 ```python
 # repositories/base_repository.py
 
+from typing import Any, Generic, Type, TypeVar
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from models.base import Base
+
+ModelType = TypeVar("ModelType", bound=Base)
+
+
+class BaseRepository(Generic[ModelType]):
+    def __init__(self, model: Type[ModelType]):
+        self.model = model
+
+    # -------- READ --------
+    def get_by_id(self, db: Session, entity_id: Any) -> ModelType | None:
+        stmt = select(self.model).where(self.model.id == entity_id)  # type: ignore[attr-defined]
+        return db.execute(stmt).scalars().first()
+
+    def list(self, db: Session, *, offset: int = 0, limit: int = 100) -> list[ModelType]:
+        stmt = select(self.model).offset(offset).limit(limit)
+        return list(db.execute(stmt).scalars().all())
+
+    # -------- WRITE --------
+    def create(self, db: Session, obj: ModelType) -> ModelType:
+        db.add(obj)
+        db.flush()
+        db.refresh(obj)
+        return obj
+
+    def update(self, db: Session, obj: ModelType, data: dict[str, Any]) -> ModelType:
+        for field, value in data.items():
+            setattr(obj, field, value)
+
+        db.flush()
+        db.refresh(obj)
+        return obj
+
+    def delete(self, db: Session, obj: ModelType) -> None:
+        db.delete(obj)
+        db.flush()
 ```
 
+Giải thích chi tiết:
+* `TypeVar("ModelType", bound=Base)`: khai báo một kiểu generic đại diện cho một ORM model bất kỳ,
+nhưng bắt buộc phải kế thừa từ Base (SQLAlchemy DeclarativeBase)
+  * `TypeVar`: tạo biến đại diện cho kiểu dữ liệu (giống như `class BaseRepository<T> extends Base { }` trong Java)
+  * `bound=Base`: giới hạn kiểu `ModelType` phải là subclass của `Base` => repo chỉ làm việc với ORM models
+    * Ví dụ: `class Student(Base): ...`
+    * Nhờ `bound=Base` chúng ta có thể dùng `self.model` với ý nghĩa:
+      * là ORM class
+      * có mapping SQLAlchemy
+      * có thể dùng trong `select(self.model)`
+* `db: Session`: ko nên cho `BaseRepository` giữ session trong constructor
+  * Tránh repo sống lâu giữ session quá vòng đời request
+  * Nên truyền `db: Session` vào từng method => repo ko tạo session, chỉ sử dụng => pattern stateless repo
+* `select(self.model)`: tạo câu lệnh SQLAlchemy `SELECT * FROM <table>`
+  * `self.model`: là ORM class (ví dụ: `Student`)
+* `db.execute(stmt)`: gửi câu SQL xuống DB => DB thực thi query
+  * Kết quả trả về một `Result` chứa `Row` dạng `(Row(Student(...)),)`
+* `scalars()`: bóc tách lớp `Row` để lấy ra ORM object `Student(...)`
+* `first()`: lấy bản ghi đầu tiên
+  * Nếu ko có bản ghi nào => trả None
+  * Ko `raise exception`
+* `# type: ignore[attr-defined]`: tránh cảnh báo typing trên IDE vì
+  * IDE không chắc model nào cũng có `id`
+  * Nhưng theo convention, mọi entity đều phải có `id` 
+* Dấu `*` đứng độc lập trong chữ ký hàm: đánh dấu rằng tất cả tham số phía sau phải truyền bằng keyword
+  * Nơi gọi cần phải `repo.list(db, offset=0, limit=10)` => giúp code rõ ràng
+* `db.add(obj)`: đưa object vào session
+* `db.flush()`: đẩy các thay đổi đang pending trong Session xuống DB
+  * Ko nhận SQL như `db.execute()`
+* `db.refresh(obj)`: lấy dữ liệu mới nhất từ DB
 
 #### 5.5.1 StudentRepository
+
+`StudentRepository` là repository cụ thể cho entity `Student`:
+* Tái sử dụng CRUD cơ bản từ BaseRepository
+* Viết thêm các query đặc thù của `Student` (ví dụ: get_by_email, search theo tên, kiểm tra trùng email, join, ...)
+* Không chứa business rule, không commit/rollback/close session
+
 
 ```python
 # repositories/student_repository.py
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from models.student import Student
+from repositories.base_repository import BaseRepository
 
 
-class StudentRepository:
-    def get_by_id(self, db: Session, student_id: int) -> Student | None:
-        return db.get(Student, student_id)
+class StudentRepository(BaseRepository[Student]):
 
-    def list(self, db: Session) -> list[Student]:
-        return db.query(Student).all()
+    def __init__(self):
+        super().__init__(Student)
 
-    def create(self, db: Session, student: Student) -> Student:
-        db.add(student)
-        db.commit()
-        db.refresh(student)
-        return student
+    def get_by_email(self, db: Session, email: str) -> Student | None:
+        stmt = select(Student).where(Student.email == email)
+        return db.execute(stmt).scalars().first()
 
-    def delete(self, db: Session, student: Student) -> None:
-        db.delete(student)
-        db.commit()
+    def search(
+            self,
+            db: Session,
+            *,
+            keyword: str | None = None,
+            min_age: int | None = None,
+            max_age: int | None = None,
+            offset: int = 0,
+            limit: int = 100,
+    ) -> list[Student]:
+        stmt = select(Student)
+
+        if keyword:
+            stmt = stmt.where(Student.full_name.ilike(f"%{keyword}%"))
+
+        if min_age is not None:
+            stmt = stmt.where(Student.age >= min_age)
+
+        if max_age is not None:
+            stmt = stmt.where(Student.age <= max_age)
+
+        stmt = stmt.offset(offset).limit(limit)
+        return list(db.execute(stmt).scalars().all())
 ```
 
-Ghi chú:
+Giải thích chi tiết:
+* `class StudentRepository(BaseRepository[Student])`:
+  * `StudentRepository` kế thừa `BaseRepository` để dùng lại các hàm CRUD chuẩn:
+    * `get_by_id(db, id)`
+    * `list(db, offset, limit)`
+    * `create(db, obj)`
+    * `delete(db, obj)`
+  * `[Student]` giúp IDE hiểu:
+    * mọi kết quả trả về sẽ là `Student` thay vì ModelType kiểu chung
+* `super().__init__(Student)`: Khi khởi tạo `StudentRepository`, ta truyền model `Student` cho `BaseRepository` để:
+  * `self.model` trở thành `Student`
+  * `select(self.model)` tương đương `select(Student)`
+* `ilike("%keyword%")`: tìm kiếm không phân biệt hoa thường (Postgres)
 
-* Repository **chỉ làm việc với ORM model**
-* Không xử lý validate nghiệp vụ
-* Không raise HTTPException
+> Best practice:
+> * Repository chỉ làm việc với ORM model
+> * Không commit/rollback => để tầng middleware xử lý 
+> * Không xử lý validate theo rule nghiệp vụ => để tầng Service xử lý (ví dụ: “email bắt buộc unique”, ...)
+> * Không `raise HTTPException`
 
 ---
 
-### 5.4 Service layer – xử lý nghiệp vụ
+### 5.4 Service layer: xử lý nghiệp vụ
 
-Tạo thư mục:
+#### 5.4.1 Quy tắc thiết kế Service chuẩn
 
-```
-app/
- ├─ services/
- │   └─ student_service.py
-```
+1. Service không commit/rollback
+   * Transaction đã do middleware quản lý
+2. Service không cần biết FastAPI
+   * Không dùng `Request`, không dùng `Depends`
+3. Service chỉ nhận `db: Session` + data
+4. Service xử lý lỗi nghiệp vụ bằng exception
+   * Sử dụng custom exception
 
-#### 5.4.1 StudentService
+#### 5.4.2 StudentService
 
 ```python
+# services/student_service.py
+
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 
 from models.student import Student
-from schemas.request.student_schema import StudentCreate, StudentUpdate
 from repositories.student_repository import StudentRepository
+from schemas.request.student_schema import StudentCreate, StudentUpdate
 
 
 class StudentService:
+
     def __init__(self):
         self.repo = StudentRepository()
 
-    def get_by_id(self, db: Session, student_id: int) -> Student:
+    # -------- READ --------
+    def get_student(self, db: Session, student_id: int) -> Student:
         student = self.repo.get_by_id(db, student_id)
         if not student:
-            raise HTTPException(status_code=404, detail="Student not found")
+            # Tạm thời sử dụng HTTPException (buổi sau nâng cấp lên custom exception)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Student not found",
+            )
         return student
 
-    def list(self, db: Session) -> list[Student]:
-        return self.repo.list(db)
+    def list_students(self, db: Session, offset: int = 0, limit: int = 100) -> list[Student]:
+        return self.repo.list(db, offset=offset, limit=limit)
 
-    def create(self, db: Session, data: StudentCreate) -> Student:
-        student = Student(
-            full_name=data.full_name,
-            age=data.age,
-            email=data.email,
+    def search_students(
+            self,
+            db: Session,
+            *,
+            keyword: str | None = None,
+            min_age: int | None = None,
+            max_age: int | None = None,
+            offset: int = 0,
+            limit: int = 100,
+    ) -> list[Student]:
+        # Rule nghiệp vụ đơn giản: min_age không được lớn hơn max_age
+        if min_age is not None and max_age is not None and min_age > max_age:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="min_age must be <= max_age",
+            )
+
+        return self.repo.search(
+            db,
+            keyword=keyword,
+            min_age=min_age,
+            max_age=max_age,
+            offset=offset,
+            limit=limit,
         )
+
+    # -------- WRITE --------
+    def create_student(self, db: Session, data: StudentCreate) -> Student:
+        # Rule nghiệp vụ: email unique
+        existed = self.repo.get_by_email(db, str(data.email))
+        if existed:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already exists",
+            )
+
+        # Rule nghiệp vụ: tuổi hợp lệ
+        if data.age < 18:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Age must be >= 18",
+            )
+
+        student = Student(**data.model_dump())
         return self.repo.create(db, student)
 
-    def update(self, db: Session, student_id: int, data: StudentUpdate) -> Student:
-        student = self.get_by_id(db, student_id)
+    # PATCH
+    def update_student(self, db: Session, student_id: int, data: StudentUpdate) -> Student:
+        student = self.get_student(db, student_id)
 
-        update_data = data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(student, field, value)
+        # Rule nghiệp vụ: không cho update age dưới 18
+        if data.age is not None and data.age < 18:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Age must be >= 18",
+            )
 
-        db.commit()
-        db.refresh(student)
-        return student
+        # exclude_unset=True: chỉ lấy field client gửi
+        updated_data = data.model_dump(exclude_unset=True)
 
-    def delete(self, db: Session, student_id: int) -> None:
-        student = self.get_by_id(db, student_id)
+        return self.repo.update(db, student, updated_data)
+
+    def delete_student(self, db: Session, student_id: int) -> None:
+        student = self.get_student(db, student_id)
         self.repo.delete(db, student)
 ```
 
-Ghi chú:
+Giải thích chi tiết:
+* `Student(**data.model_dump())`: Chuyển dữ liệu từ Pydantic Schema sang ORM Model
+  * `data`: Lấy dữ liệu đã validate từ pydantic schema
+  * `model_dump()`: Convert pydantic schema sang dict (với pydantic v1: dùng `.dict()`)
+  * `Student(...)`: Dùng dict đó để khởi tạo ORM model chưa lưu DB
+  * `**`: Giải nén dict thành các keyword arguments (ví dụ `Student(full_name="Nguyen Van A", age=20, email="a@test.com")`)
 
-* Service là nơi **validate nghiệp vụ**
-* Được phép raise `HTTPException`
-* Mapping Schema → Model diễn ra tại đây
+> Best practice:
+> * Service là nơi xử lý rule nghiệp vụ
+> * Không quản transaction (đã có middleware lo)
+> * Được phép raise `HTTPException` hoặc custom exception
+> * Mapping Schema => Model nên thực hiện tại đây
+
+#### 5.4.3 Phân biệt lỗi nghiệp vụ vs lỗi hệ thống
+
+1. Lỗi nghiệp vụ (Service xử lý):
+
+* Email đã tồn tại
+* min_age > max_age
+* Age < 18
+
+=> Trả 400/409
+
+2. Lỗi hệ thống (Middleware/DB)
+* DB mất kết nối
+* lỗi SQL, constraint lỗi
+
+=> middleware rollback, FastAPI trả 500 (exception handler riêng)
 
 ---
 
-### 5.5 Router layer – API endpoints
+### 5.5 Router layer: API endpoints
 
-Tạo file `routers/student_router.py`:
+#### 5.5.1 Luồng xử lý trong Router
+
+```
+POST /students
+   ↓
+Router nhận StudentCreate (validate)
+   ↓
+Router lấy db session: db = Depends(get_db)
+   ↓
+Router gọi service.create_student(db, data)
+   ↓
+Service gọi repo lưu DB
+   ↓
+Router map Student ORM → StudentOut
+   ↓
+Trả response 201
+```
+
+#### 5.5.2 Response wrapper (Pydantic schema)
+
+Response wrapper phải kế thừa `BaseModel` của Pydantic để FastAPI tự động:
+* Serialize sang JSON
+* Set `Content-Type`
+* Apply `response_model`
+* Validate output
+
+=> đây là “happy path” chuẩn FastAPI
 
 ```python
-from fastapi import APIRouter, Depends
+# schemas/response/base.py
+
+from typing import Generic, TypeVar
+from pydantic import BaseModel
+
+T = TypeVar("T")
+
+
+class SuccessResponse(BaseModel, Generic[T]):
+    success: bool = True
+    data: T
+    message: str | None = None
+    trace_id: str | None = None # được tạo ở TraceIdMiddleware
+```
+
+Cách làm SAI: trả `JSONResponse`
+* Router mất `response_model
+* Swagger không biết schema thật
+* Data bị serialize 2 lần
+* Pydantic bị bypass
+* Service / Controller bị gắn chặt HTTP response
+
+```python
+def response_success(data):
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "data": data
+        }
+    )
+```
+
+=> anti-pattern trong FastAPI
+
+#### 5.5.3 TraceIdMiddleware
+
+Tạo biến context theo từng request / coroutine:
+* `ContextVar` cho phép tạo biến virtual toàn cục, nhưng mỗi request (async task) sẽ có giá trị riêng (ko giống biến global)
+* `ContextVar` hoạt động thực tế như sau: giả sử có 2 request đồng thời:
+  * Request A có `trace_id_ctx="abc-123"`
+  * Request B có `trace_id_ctx="xyz-456"`
+  * Dù chạy async, nhưng vẫn ko bị đè lên nhau
+
+```python
+# core/trace.py
+from contextvars import ContextVar
+
+trace_id_ctx: ContextVar[str | None] = ContextVar("trace_id", default=None)
+```
+
+Tạo `TraceIdMiddleware`:
+
+```python
+import uuid
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+from core.trace import trace_id_ctx
+
+TRACE_HEADER = "X-Trace-Id"
+
+
+class TraceIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        # Luôn generate trace_id mới cho mỗi request
+        trace_id = str(uuid.uuid4())
+
+        # Gắn vào request.state để controller/service dùng
+        request.state.trace_id = trace_id
+
+        # Gắn vào contextvar để logging tự động lấy được
+        token = trace_id_ctx.set(trace_id)
+        try:
+            response = await call_next(request)
+        finally:
+            # Reset context để tránh leak sang request khác
+            trace_id_ctx.reset(token)
+
+        # Trả trace_id cho client qua header
+        response.headers[TRACE_HEADER] = trace_id
+        return response
+```
+
+#### 5.5.4 Cấu hình Logging
+
+```python
+# core/app_logging.py
+import logging
+from colorlog import ColoredFormatter
+from core.trace import trace_id_ctx
+
+
+class TraceIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.trace_id = trace_id_ctx.get() or "n/a"
+        return True
+
+# Gọi 1 lần khi app start để
+# tạo formatter có %(trace_id)s
+# và gắn TraceIdFilter vào root logger
+def setup_logging(sql_echo: bool = False) -> None:
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    trace_filter = TraceIdFilter()
+
+    # Nếu root đã có handler (thường do uvicorn cấu hình), gắn filter vào các handler đó
+    if root.handlers:
+        for h in root.handlers:
+            h.addFilter(trace_filter)
+    else:
+        # Nếu chưa có handler nào, tự tạo handler console theo format tự cấu hình
+        handler = logging.StreamHandler()
+        formatter = ColoredFormatter(
+            fmt="%(log_color)s %(asctime)s %(levelname)s [trace_id=%(trace_id)s] %(name)s: %(message)s",
+            log_colors={
+                "DEBUG": "white",
+                "INFO": "green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_red",
+            }
+        )
+        handler.setFormatter(formatter)
+        handler.addFilter(trace_filter)
+        root.addHandler(handler)
+
+    # DEV ONLY: bật SQLAlchemy engine log qua hệ logging hiện tại
+    sa_logger = logging.getLogger("sqlalchemy.engine")
+    sa_logger.setLevel(logging.INFO if sql_echo else logging.WARNING)
+    sa_logger.propagate = True
+```
+
+Tắt `echo=True` làm SQLAlchemy bật logging/echo ở mức INFO để tránh dup log DB:
+
+```python
+engine = create_engine(
+    settings.database_url,
+    echo=False, # tắt echo để tránh duplicate log DB
+    pool_pre_ping=True,
+    pool_size=settings.pool_size,
+    max_overflow=settings.max_overflow,
+)
+```
+
+Đăng ký `TraceIdMiddleware` và gọi `setup_logging()` trong `main.py`:
+
+```python
+from fastapi import FastAPI
+
+from configs.env import settings_config
+from controllers.health_controller import health_router
+from controllers.student_controller import student_router
+from controllers.user_controller import user_router
+from core.app_logging import setup_logging
+from middlewares.db_session import DBSessionMiddleware
+from middlewares.trace_id import TraceIdMiddleware
+
+app = FastAPI()
+
+settings = settings_config()
+setup_logging(sql_echo=(settings.environment == "DEV"))
+
+# Đăng ký router
+app.include_router(health_router, tags=["Health"])
+app.include_router(user_router, prefix="/users", tags=["Users"])
+app.include_router(student_router, prefix="/students", tags=["Students"])
+
+app.add_middleware(DBSessionMiddleware)
+app.add_middleware(TraceIdMiddleware)  # add sau để bọc ngoài
+```
+
+**Lưu ý**:
+* KHÔNG bật SQL log ở PROD vì:
+  * lộ cấu trúc DB, query, đôi khi lộ dữ liệu
+  * log rất lớn, tốn chi phí
+
+#### 5.5.5 Student controller
+
+Quy tắc ngầm định của FastAPI:
+* FastAPI tự hiểu Query Param khi:
+  * Tham số không nằm trong path (`/search` không có `{}`)
+  * Không phải `Depends(...)`
+  * Không phải Pydantic model (kế thừa `BaseModel`)
+* FastAPI tự hiểu Request Body khi:
+  * Là Pydantic BaseModel
+  * Không có `Depends`
+  * Không nằm trong path
+
+Lưu ý thứ tự khai báo route và kiểu tham số:
+* Luôn khai báo route tĩnh trước route động (route có `{}`)
+* Nên khai báo ràng buộc kiểu cho path param
+  * `@student_router.get("/{student_id:int}")`
+  * `"/{student_id:int}"`: ko có space, nếu có space trả lỗi `405`
+
+
+```python
+# controllers/student_controller.py
+
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from deps.db import get_db
+from dependencies.db import get_db
 from schemas.request.student_schema import StudentCreate, StudentUpdate
-from schemas.request.student_schema import StudentOut
+from schemas.response.base import SuccessResponse
+from schemas.response.error_response import ErrorResponse
+from schemas.response.student_out_schema import StudentOut
 from services.student_service import StudentService
 
-router = APIRouter(prefix="/students", tags=["Students"])
+student_router = APIRouter()
 service = StudentService()
 
 
-@router.get("/{student_id}", response_model=StudentOut)
-def get_student(student_id: int, db: Session = Depends(get_db)):
-    return service.get_by_id(db, student_id)
+@student_router.get("", response_model=SuccessResponse[list[StudentOut]])
+def list_students(
+        offset: int = 0,
+        limit: int = 100,
+        db: Session = Depends(get_db),
+) -> SuccessResponse[list[StudentOut]]:
+    students = service.list_students(db, offset=offset, limit=limit)
+    data = [StudentOut.model_validate(student) for student in students]
+    return SuccessResponse(data=data)
 
 
-@router.get("", response_model=list[StudentOut])
-def list_students(db: Session = Depends(get_db)):
-    return service.list(db)
+@student_router.get(
+    "/{student_id:int}",
+    response_model=SuccessResponse[StudentOut],
+    responses={404: {"model": ErrorResponse, "description": "Student not found"}},
+)
+def get_student(
+        student_id: int,
+        db: Session = Depends(get_db),
+) -> SuccessResponse[StudentOut]:
+    student = service.get_student(db, student_id)
+    return SuccessResponse(data=StudentOut.model_validate(student))
 
 
-@router.post("", response_model=StudentOut, status_code=201)
-def create_student(data: StudentCreate, db: Session = Depends(get_db)):
-    return service.create(db, data)
+@student_router.get(
+    "/search",
+    response_model=SuccessResponse[list[StudentOut]],
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": "Invalid search parameters (business rule violation)"
+        }
+    }
+)
+def search_students(
+        keyword: str | None = None,
+        min_age: int | None = None,
+        max_age: int | None = None,
+        offset: int = 0,
+        limit: int = 100,
+        db: Session = Depends(get_db),
+) -> SuccessResponse[list[StudentOut]]:
+    students = service.search_students(
+        db,
+        keyword=keyword,
+        min_age=min_age,
+        max_age=max_age,
+        offset=offset,
+        limit=limit,
+    )
+    data = [StudentOut.model_validate(s) for s in students]
+    return SuccessResponse(data=data)
 
 
-@router.put("/{student_id}", response_model=StudentOut)
+@student_router.post(
+    "",
+    response_model=SuccessResponse[StudentOut],
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {"model": ErrorResponse, "description": "Business validation error"},
+        409: {"model": ErrorResponse, "description": "Email already exists"}
+    },
+)
+def create_student(
+        data: StudentCreate,
+        response: Response,
+        db: Session = Depends(get_db),
+) -> SuccessResponse[StudentOut]:
+    student = service.create_student(db, data)
+
+    # Set Location header
+    response.headers["location"] = f"/students/{student.id}"
+
+    return SuccessResponse(data=StudentOut.model_validate(student))
+
+
+@student_router.patch(
+    "/{student_id}",
+    response_model=SuccessResponse[StudentOut],
+    responses={
+        400: {"model": ErrorResponse, "description": "Business validation error"},
+        404: {"model": ErrorResponse, "description": "Not found"},
+    }
+)
 def update_student(
-    student_id: int,
-    data: StudentUpdate,
-    db: Session = Depends(get_db),
-):
-    return service.update(db, student_id, data)
+        student_id: int,
+        data: StudentUpdate,
+        db: Session = Depends(get_db),
+) -> SuccessResponse[StudentOut]:
+    student = service.update_student(db, student_id, data)
+    return SuccessResponse(data=StudentOut.model_validate(student))
 
 
-@router.delete("/{student_id}", status_code=204)
-def delete_student(student_id: int, db: Session = Depends(get_db)):
-    service.delete(db, student_id)
+@student_router.delete(
+    "/{student_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": ErrorResponse, "description": "Not found"}},
+)
+def delete_student(
+        student_id: int,
+        db: Session = Depends(get_db),
+) -> None:
+    service.delete_student(db, student_id)
     return None
 ```
+
+Giải thích thêm:
+* Theo patter chuẩn REST, đối với `POST /students` nên trả kèm field `location` trong header
+  * `response.headers["Location"]`: set url cho `location`
 
 ---
 
@@ -1387,33 +1914,18 @@ def delete_student(student_id: int, db: Session = Depends(get_db)):
 ```python
 from fastapi import FastAPI
 
-from routers.student_router import router as student_router
+from controllers.student_controller import student_router
 
 app = FastAPI()
-app.include_router(student_router)
+app.include_router(student_router, prefix="/students", tags=["Students"])
 ```
 
 ---
 
-### 5.7 Checklist kiến trúc CRUD chuẩn
+### 5.7 Lưu ý kiến trúc CRUD chuẩn
 
 * Router không query DB
-* Repository không biết HTTP
-* Service không biết Request/Response format
+* Repository ko cần biết HTTP
+* Service ko cần biết Request/Response format
 * Mỗi request dùng 1 DB session
 * Schema dùng cho API, Model dùng cho DB
-
----
-
-### 5.8 Bài tập thực hành
-
-1. Hoàn thiện CRUD cho `Task`
-2. Tạo `TaskRepository`, `TaskService`, `TaskRouter`
-3. Áp dụng `response_model`
-4. Test bằng Swagger UI
-
----
-
-✅ Kết thúc Phần 5 – CRUD với DB (get_db → Repository → Service → Router)
-
-➡️ Buổi tiếp theo: **Testing (pytest) & Error Handling nâng cao**
