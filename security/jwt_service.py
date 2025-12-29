@@ -4,52 +4,58 @@ from typing import Any
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError
 
-from configs.env import settings_config
-
-_settings = settings_config()
-
-JWT_ALGORITHM = _settings.jwt_algorithm
-JWT_SECRET_KEY = _settings.jwt_secret_key
-JWT_ISSUER = _settings.jwt_issuer
-JWT_AUDIENCE = _settings.jwt_audience
+from configs.settings.security import JwtSettings
 
 
-def create_access_token(
-    *,
-    subject: str,
-    permissions: list[str],
-    roles: list[str] | None = None,
-    expires_minutes: int = 15,
-    extra_claims: dict[str, Any] | None = None,
-) -> str:
-    now = datetime.now(timezone.utc)
-    payload: dict[str, Any] = {
-        "sub": subject,
-        "iss": JWT_ISSUER,
-        "aud": JWT_AUDIENCE,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=expires_minutes)).timestamp()),
-        "permissions": permissions,
-        "roles": roles or [],
-    }
-    if extra_claims:
-        payload.update(extra_claims)
+class JwtService:
+    def __init__(self, settings: JwtSettings):
+        self._settings = settings
 
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    def create_access_token(
+        self,
+        *,
+        subject: str,
+        permissions: list[str],
+        roles: list[str] | None = None,
+        token_version: int = 1,
+        extra_claims: dict[str, Any] | None = None,
+    ) -> str:
+        now = datetime.now(timezone.utc)
 
+        payload: dict[str, Any] = {
+            "sub": subject,
+            "iss": self._settings.issuer,
+            "aud": self._settings.audience,
+            "iat": now,
+            "exp": now + timedelta(minutes=self._settings.access_token_ttl_minutes),
+            "permissions": permissions,
+            "roles": roles or [],
+            "tv": token_version,
+        }
+        if extra_claims:
+            payload.update(extra_claims)
 
-def decode_access_token(token: str) -> tuple[dict[str, Any] | None, str | None]:
-    try:
-        claims = jwt.decode(
-            token,
-            JWT_SECRET_KEY,
-            algorithms=[JWT_ALGORITHM],
-            audience=JWT_AUDIENCE,
-            issuer=JWT_ISSUER,
-            options={"require_aud": True, "require_iss": True},
+        return jwt.encode(
+            payload,
+            self._settings.secret_key.get_secret_value(),
+            algorithm=self._settings.algorithm,
         )
-        return claims, None
-    except ExpiredSignatureError:
-        return None, "expired"
-    except JWTError:
-        return None, "invalid"
+
+    def decode_access_token(self, token: str) -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            claims = jwt.decode(
+                token,
+                self._settings.secret_key.get_secret_value(),
+                algorithms=[self._settings.algorithm],
+                audience=self._settings.audience,
+                issuer=self._settings.issuer,
+                options={
+                    "require_aud": True,
+                    "require_iss": True,
+                },
+            )
+            return claims, None
+        except ExpiredSignatureError:
+            return None, "expired"
+        except JWTError:
+            return None, "invalid"

@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from configs.env import settings_config
 from controllers.health_controller import health_router
@@ -8,6 +9,7 @@ from core.app_logging import setup_logging
 from core.exceptions.base import BusinessException
 from core.exceptions.exception_handlers import business_exception_handler, unhandled_exception_handler
 from core.middlewares.db_session import DBSessionMiddleware
+from core.middlewares.token_context import TokenContextMiddleware
 from core.middlewares.trace_id import TraceIdMiddleware
 
 app = FastAPI()
@@ -26,4 +28,24 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 # Đăng ký middleware => thứ tự quan trọng
 app.add_middleware(DBSessionMiddleware)
+app.add_middleware(TokenContextMiddleware)
 app.add_middleware(TraceIdMiddleware)  # add sau để bọc ngoài
+
+# CORS middleware (OUTERMOST)
+cors = settings.security.cors
+if cors.enabled:
+    # Guard: khi dùng cookie (allow_credentials=True) thì không được phép allow_origins="*"
+    if cors.allow_credentials and ("*" in cors.allow_origins):
+        raise RuntimeError(
+            "CORS misconfig: allow_credentials=True cannot be used with allow_origins='*'"
+        )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors.allow_origins,
+        allow_credentials=cors.allow_credentials,
+        allow_methods=cors.allow_methods,
+        allow_headers=cors.allow_headers,
+        expose_headers=cors.expose_headers,
+        max_age=cors.max_age,
+    )

@@ -729,7 +729,7 @@ if user.role == "teacher" and student.teacher_id != user.id:
 
 #### 2.6.3 Pattern exception chuẩn
 
-* `UnauthorizedException` (401): thiếu/invalid token
+* `AuthTokenMissingException` (401): thiếu token
 * `ForbiddenException` (403): token OK nhưng không đủ quyền
 * `InvalidTokenException` (401)
 * `TokenExpiredException` (401)
@@ -958,6 +958,15 @@ Giải thích chi tiết:
       * Nếu ko có `lazy="selectin"`: 
         * Khi truy cập `role.users`
         * SQLAlchemy có thể chạy thêm nhiều query lặp => N+1 problem
+* `token_version`: dùng cho cơ chế soft-revoke token
+  * Tăng `token_version` trong DB để:
+    * vô hiệu hoá tất cả access token cũ của user
+    * không cần chờ access token hết hạn
+  * Các tình huống thực tế:
+    * User đổi mật khẩu
+    * Admin khóa/mở tài khoản
+    * User logout toàn bộ thiết bị
+    * Phát hiện token bị lộ
 
 Tạo thêm model cho refresh_token:
 
@@ -1149,6 +1158,18 @@ class AuthRepository:
         token_version = getattr(user, "token_version", 1)
         return roles, permissions, token_version
 ```
+
+* `selectinload(User.roles)`: cơ chế load dữ liệu thông minh để tránh N+1, SQLAlchemy sẽ làm các bước:
+  * Bước 1: chạy query chính `SELECT * FROM users;`
+    * Kết quả: `users = [User(id=1), User(id=2),]`
+    * Lúc này SQLAlchemy chưa load roles
+  * Bước 2: nội bộ SQLAlchemy tự chạy truy vấn bảng trung gian `user_roles`
+    * `SELECT user_id, role_id FROM user_roles WHERE user_id IN (1, 2);`
+    * Kết quả được danh sách role: `list_of_role_ids = [10, 20]`
+  * Bước 3: chạy query phụ `SELECT * FROM roles WHERE roles.id IN (10, 20);`
+  * Bước 4: ORM tự ghép dữ liệu lại từ kết quả bảng trung gian
+    * `User(id=1).roles = [Role(id=10), Role(id=20)]`
+    * `User(id=2).roles = [Role(id=20)]`
 
 RefreshSessionRepository: thao tác với bảng `refresh_sessions`
 
@@ -1377,55 +1398,61 @@ from typing import Any
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError
 
-from configs.env import settings_config
-
-_settings = settings_config()
-
-JWT_ALGORITHM = _settings.jwt_algorithm
-JWT_SECRET_KEY = _settings.jwt_secret_key
-JWT_ISSUER = _settings.jwt_issuer
-JWT_AUDIENCE = _settings.jwt_audience
+from configs.settings.security import JwtSettings
 
 
-def create_access_token(
-    *,
-    subject: str,
-    permissions: list[str],
-    roles: list[str] | None = None,
-    expires_minutes: int = 15,
-    extra_claims: dict[str, Any] | None = None,
-) -> str:
-    now = datetime.now(timezone.utc)
-    payload: dict[str, Any] = {
-        "sub": subject,
-        "iss": JWT_ISSUER,
-        "aud": JWT_AUDIENCE,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=expires_minutes)).timestamp()),
-        "permissions": permissions,
-        "roles": roles or [],
-    }
-    if extra_claims:
-        payload.update(extra_claims)
+class JwtService:
+    def __init__(self, settings: JwtSettings):
+        self._settings = settings
 
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    def create_access_token(
+        self,
+        *,
+        subject: str,
+        permissions: list[str],
+        roles: list[str] | None = None,
+        token_version: int = 1,
+        extra_claims: dict[str, Any] | None = None,
+    ) -> str:
+        now = datetime.now(timezone.utc)
 
+        payload: dict[str, Any] = {
+            "sub": subject,
+            "iss": self._settings.issuer,
+            "aud": self._settings.audience,
+            "iat": now,
+            "exp": now + timedelta(minutes=self._settings.access_token_ttl_minutes),
+            "permissions": permissions,
+            "roles": roles or [],
+            "tv": token_version,
+        }
+        if extra_claims:
+            payload.update(extra_claims)
 
-def decode_access_token(token: str) -> tuple[dict[str, Any] | None, str | None]:
-    try:
-        claims = jwt.decode(
-            token,
-            JWT_SECRET_KEY,
-            algorithms=[JWT_ALGORITHM],
-            audience=JWT_AUDIENCE,
-            issuer=JWT_ISSUER,
-            options={"require_aud": True, "require_iss": True},
+        return jwt.encode(
+            payload,
+            self._settings.secret_key.get_secret_value(),
+            algorithm=self._settings.algorithm,
         )
-        return claims, None
-    except ExpiredSignatureError:
-        return None, "expired"
-    except JWTError:
-        return None, "invalid"
+
+    def decode_access_token(self, token: str) -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            claims = jwt.decode(
+                token,
+                self._settings.secret_key.get_secret_value(),
+                algorithms=[self._settings.algorithm],
+                audience=self._settings.audience,
+                issuer=self._settings.issuer,
+                options={
+                    "require_aud": True,
+                    "require_iss": True,
+                },
+            )
+            return claims, None
+        except ExpiredSignatureError:
+            return None, "expired"
+        except JWTError:
+            return None, "invalid"
 ```
 
 **Lưu ý**: Đối với các dòng dự án cần bảo mật cao => thường dùng RS256 + JWKS
@@ -1454,47 +1481,540 @@ Chuẩn hoá set cookie:
 
 ```python
 # security/cookie_policy.py
-from typing import Literal
-
 from fastapi import Response
 
-SameSite = Literal["lax", "strict", "none"]
+from configs.settings.security import RefreshCookieSettings
 
 
 class RefreshCookiePolicy:
-    def __init__(
-            self,
-            *,
-            name: str = "refresh_token",
-            path: str = "/api/v1/auth/refresh",
-            secure: bool = True,
-            samesite: SameSite = "strict",
-            max_age_seconds: int = 60 * 60 * 24 * 14,
-    ):
-        self.name = name
-        self.path = path
-        self.secure = secure
-        self.samesite: SameSite = samesite
-        self.max_age_seconds = max_age_seconds
+    def __init__(self, settings: RefreshCookieSettings):
+        self._settings = settings
+
+    @property
+    def name(self) -> str:
+        return self._settings.name
+
+    @property
+    def path(self) -> str:
+        return self._settings.path
 
     def set(self, response: Response, token: str) -> None:
         response.set_cookie(
-            key=self.name,
+            key=self._settings.name,
             value=token,
             httponly=True,
-            secure=self.secure,
-            samesite=self.samesite,
-            max_age=self.max_age_seconds,
-            path=self.path,
+            secure=self._settings.secure,
+            samesite=self._settings.samesite,
+            max_age=self._settings.max_age_seconds,
+            path=self._settings.path,
         )
 
     def clear(self, response: Response) -> None:
-        response.delete_cookie(key=self.name, path=self.path)
+        response.delete_cookie(key=self._settings.name, path=self._settings.path)
+```
+
+Cấu hình các thông tin dành cho security:
+
+```python
+# configs/settings/security.py
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from configs.settings.cors import CorsSettings
+
+SameSite = Literal["lax", "strict", "none"]
+JwtAlgorithm = Literal["HS256", "RS256"]
+
+
+class JwtSettings(BaseModel):
+    """
+    JWT policy:
+    - HS256: dùng secret key (internal)
+    - RS256: dùng private/public key (SSO/microservices)
+    """
+    model_config = ConfigDict(frozen=True)
+
+    algorithm: JwtAlgorithm = Field(default="HS256")
+    secret_key: SecretStr | None = None  # HS256
+    issuer: str = Field(default="techzen-company")
+    audience: str = Field(default="academy-api")
+
+    access_token_ttl_minutes: int = Field(default=15)
+
+
+class RefreshSessionSettings(BaseModel):
+    """
+    Refresh session policy:
+    - TTL tính theo minutes (đồng bộ với env)
+    - rotate_on_refresh: luôn rotate để chống replay
+    """
+    model_config = ConfigDict(frozen=True)
+
+    ttl_minutes: int = Field(default=60 * 24 * 14)
+    rotate_on_refresh: bool = Field(default=True)
+
+
+class RefreshCookieSettings(BaseModel):
+    """
+    Settings cho refresh token cookie:
+    - path: đặt ở scope /api hoặc /api/v1/auth (tránh hard-code endpoint cụ thể /refresh)
+    - secure=True trong prod (HTTPS)
+    - samesite=strict nếu same-site; nếu cross-site SPA thì thường phải cân nhắc none+lax tùy kiến trúc
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(default="refresh_token")
+    path: str = Field(default="/api/v1/auth")  # cookie chỉ gửi cho các route /auth
+    secure: bool = Field(default=True)  # secure=true: cookie CHỈ được gửi qua HTTPS
+    samesite: SameSite = Field(default="strict")  # dùng để giảm nguy cơ CSRF (Cross-Site Request Forgery)
+    max_age_seconds: int = Field(default=60 * 60 * 24 * 14)  # 14 days
+
+
+class SecuritySettings(BaseModel):
+    """
+    Nhóm cấu hình security, có thể mở rộng thêm:
+    - cookie_domain
+    - etc...
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    jwt: JwtSettings = Field(default_factory=JwtSettings)
+    refresh_session: RefreshSessionSettings = Field(default_factory=RefreshSessionSettings)
+    refresh_cookie: RefreshCookieSettings = Field(default_factory=RefreshCookieSettings)
+    cors: CorsSettings = Field(default_factory=CorsSettings)
+```
+
+* `SameSite`: cấu hỉnh để trình duyệt biết cách xử lý "Khi request đến từ site khác, có gửi cookie hay không?" (CSRF)
+  * `SameSite=Strict`: cấp bảo mật chặt nhất
+    * Browser chỉ gửi cookie nếu:
+      * user truy cập trực tiếp site
+    * KHÔNG gửi cookie nếu:
+      * click link từ site khác
+      * request đến từ iframe / form / fetch cross-site
+  * `SameSite=Lax`: cấu hình mức bảo mật cân bằng (là default của browser)
+    * Gửi cookie khi:
+      * user click link `GET` từ site khác
+    * KHÔNG gửi cookie khi:
+      * `POST` / `PUT` / `DELETE` cross-site
+      * fetch / ajax cross-site
+  * `SameSite=None`: mức bảo mật mở nhất
+    * Gửi cookie trong mọi request
+    * Bao gồm cross-site, iframe, SSO
+    * CHỈ dùng cho các trường hợp:
+      * Frontend và Backend khác domain
+      * SSO
+
+```python
+# configs/env.py
+from functools import lru_cache
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+
+from configs.settings.security import SecuritySettings
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    environment: str = Field(..., validation_alias="ENVIRONMENT")
+    database_url: str = Field(..., validation_alias="DATABASE_URL")
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
+
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_secret_key: str = Field(..., validation_alias="JWT_SECRET_KEY")
+    jwt_issuer: str = Field(..., validation_alias="JWT_ISSUER")
+    jwt_audience: str = Field(..., validation_alias="JWT_AUDIENCE")
+    
+    access_token_expired_minutes: int = Field(..., validation_alias="ACCESS_TOKEN_EXPIRED_MINUTES")
+
+    tz: str = Field(default="UTC", validation_alias="TZ")
+
+    pool_size: int = Field(default=10, validation_alias="DB_POOL_SIZE")
+    max_overflow: int = Field(default=20, validation_alias="DB_MAX_OVERFLOW")
+
+
+@lru_cache
+def settings_config() -> Settings:
+    # noinspection PyArgumentList
+    return Settings()
+```
+
+Tạo factory DI provider để lấy policy từ Settings:
+
+```python
+# security/dependencies.py
+from functools import lru_cache
+
+from configs.env import settings_config
+from security.cookie_policy import RefreshCookiePolicy
+
+
+@lru_cache
+def get_refresh_cookie_policy() -> RefreshCookiePolicy:
+    settings = settings_config()
+    return RefreshCookiePolicy(settings.security.refresh_cookie)
 ```
 
 ---
 
-#### 2.9.7 TokenContextMiddleware
+#### 2.9.7 Cấu hình CORS (Cross-Origin Resource Sharing)
+
+> CORS là một cơ chế bảo mật của trình duyệt web với cách hoạt động theo các bước sau:
+> 1. Ví dụ Web client chạy tại: http://localhost:5173 và gọi `GET http://127.0.0.1:8000/students?offset=0&limit=100` 
+> 2. Browser xác định đây là request cross-origin vì khác host và port
+> 3. Browser quyết định có cần preflight (OPTIONS) không
+>    * Method: `GET` => OK
+>    * Có header `Authorization`
+>    * => cần gửi preflight
+> 4. Browser gửi request `OPTIONS` (preflight)
+>    * Browser chưa gửi GET thật, mà gửi trước preflight để xin phép:
+
+```http request
+OPTIONS /students?offset=0&limit=100 HTTP/1.1
+Host: 127.0.0.1:8000
+Origin: http://localhost:5173
+Access-Control-Request-Method: GET
+Access-Control-Request-Headers: Authorization
+```
+
+> 5. CORS Middleware của FastAPI xử lý OPTIONS
+>   * CORS middleware chạy ngoài cùng:
+>     * Bắt request OPTIONS
+>     * KHÔNG đi vào router
+>     * KHÔNG cần DB
+>     * KHÔNG cần auth
+>   * Middleware đối chiếu cấu hình để so sánh với `CorsSettings`:
+>     * `Origin` có thuộc `allow_origins` ko
+>     * `GET` có thuộc `allow_methods` ?
+>     * `Authorization` có thuộc `allow_headers` ?
+>     * Nếu tất cả khớp => cho phép
+> 6. Server trả response cho preflight 
+
+```http
+HTTP/1.1 200 OK
+Access-Control-Allow-Origin: http://localhost:5173
+Access-Control-Allow-Methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+Access-Control-Allow-Headers: Authorization,Content-Type
+Access-Control-Allow-Credentials: true
+Access-Control-Max-Age: 600
+```
+
+> 7. Browser quyết định: CHO PHÉP hay CHẶN
+>   * Browser kiểm tra response:
+>     * Có Access-Control-Allow-Origin khớp origin gửi đi
+>     * Có Authorization trong Allow-Headers
+>     * Có Allow-Credentials (vì request có credentials)
+>   * Nếu thiếu 1 header => browser CHẶN tại đây => `GET` thật KHÔNG bao giờ được gửi
+>   * Nếu đủ tất cả => gửi `GET` thật đi
+
+Cấu hình CORS:
+* Chỉ allow đúng origin của SPA, không dùng `*`
+* Bật `allow_credentials=True` vì dùng cookie (refresh token)
+* Preflight (OPTIONS) phải đi qua được (KHÔNG chặn `OPTIONS` bằng auth)
+* Khai báo headers cần thiết: `Authorization`, `Content-Type`, `X-Trace-Id`
+* Expose header để client đọc X-Trace-Id
+
+1. Tạo CORS settings theo chuẩn config-driven:
+
+```python
+# configs/settings/cors.py
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class CorsSettings(BaseModel):
+    """
+    CORS settings (enterprise):
+    - allow_origins: whitelist origin của SPA, KHÔNG dùng '*'
+    - allow_credentials=True để browser gửi cookie (refresh token)
+    - expose_headers: để FE đọc X-Trace-Id
+    """
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = Field(default=True)
+
+    # môi trường prod: ["https://app.company.com"]
+    # dev: ["http://localhost:5173", "http://localhost:3000"]
+    allow_origins: list[str] = Field(default_factory=list)
+
+    allow_methods: list[str] = Field(default_factory=lambda: [
+        "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
+    ])
+
+    # Header FE gửi:
+    # - Authorization (access token)
+    # - Content-Type
+    allow_headers: list[str] = Field(default_factory=lambda: [
+        "Authorization", "Content-Type"
+    ])
+
+    # Header FE cần đọc:
+    expose_headers: list[str] = Field(default_factory=lambda: [
+        "X-Trace-Id"
+    ])
+
+    allow_credentials: bool = Field(default=True)
+
+    # Cache preflight 10 phút
+    max_age: int = Field(default=600)
+```
+
+2. Mở rộng SecuritySettings để có `cors`:
+
+```python
+# configs/settings/security.py
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field
+
+from configs.settings.cors import CorsSettings
+
+SameSite = Literal["lax", "strict", "none"]
+
+
+class RefreshCookieSettings(BaseModel):
+    """
+    Settings cho refresh token cookie:
+    - path: đặt ở scope /api hoặc /api/v1/auth (tránh hard-code endpoint cụ thể /refresh)
+    - secure=True trong prod (HTTPS)
+    - samesite=strict nếu same-site; nếu cross-site SPA thì thường phải cân nhắc none+lax tùy kiến trúc
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(default="refresh_token")
+    path: str = Field(default="/api/v1/auth")  # cookie chỉ gửi cho các route /auth
+    secure: bool = Field(default=True)  # secure=true: cookie CHỈ được gửi qua HTTPS
+    samesite: SameSite = Field(default="strict")  # dùng để giảm nguy cơ CSRF (Cross-Site Request Forgery)
+    max_age_seconds: int = Field(default=60 * 60 * 24 * 14)  # 14 days
+
+
+class SecuritySettings(BaseModel):
+    """
+    Nhóm cấu hình security, có thể mở rộng thêm:
+    - access_token_ttl_seconds
+    - refresh_token_ttl_seconds
+    - cookie_domain
+    - etc...
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    refresh_cookie: RefreshCookieSettings = Field(default_factory=RefreshCookieSettings)
+    cors: CorsSettings = Field(default_factory=CorsSettings)
+```
+
+3. Cấu hình values theo môi trường (prod/dev)
+
+```dotenv
+# file .env
+ENVIRONMENT=DEV
+
+DATABASE_URL=postgresql+psycopg2://postgres:123456%40root@localhost:5432/techzen_academy
+TZ=Asia/Ho_Chi_Minh
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+
+JWT_ALGORITHM=HS256
+JWT_SECRET_KEY=techzen-academy-example-secret-key
+JWT_ISSUER=techzen-company
+JWT_AUDIENCE=techzen-academy-api
+
+ACCESS_TOKEN_EXPIRED_MINUTES=15
+REFRESH_SESSION_TTL_MINUTES=20160
+
+REFRESH_COOKIE_SECURE=false
+REFRESH_COOKIE_SAMESITE=lax
+REFRESH_COOKIE_PATH=/api/v1/auth
+REFRESH_COOKIE_MAX_AGE_SECONDS=1209600
+
+CORS_ALLOW_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+```python
+# configs/env.py
+from functools import lru_cache
+from typing import Any
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr
+
+from configs.settings.security import SecuritySettings, SameSite, JwtSettings, JwtAlgorithm, RefreshCookieSettings
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    environment: str = Field(..., validation_alias="ENVIRONMENT")
+    database_url: str = Field(..., validation_alias="DATABASE_URL")
+
+    cors_allow_origins_raw: str | None = Field(default=None, validation_alias="CORS_ALLOW_ORIGINS")
+    jwt_algorithm: JwtAlgorithm = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_secret_key: SecretStr = Field(..., validation_alias="JWT_SECRET_KEY")
+    jwt_issuer: str = Field(..., validation_alias="JWT_ISSUER")
+    jwt_audience: str = Field(..., validation_alias="JWT_AUDIENCE")
+    access_token_expired_minutes: int = Field(default=15, validation_alias="ACCESS_TOKEN_EXPIRED_MINUTES")
+    refresh_token_expired_minutes: int = Field(default=20160, validation_alias="REFRESH_SESSION_TTL_MINUTES")
+    refresh_cookie_secure: bool | None = Field(default=None, validation_alias="REFRESH_COOKIE_SECURE")
+    refresh_cookie_samesite: SameSite | None = Field(default=None, validation_alias="REFRESH_COOKIE_SAMESITE")
+    refresh_cookie_path: str | None = Field(default=None, validation_alias="REFRESH_COOKIE_PATH")
+    refresh_cookie_max_age_seconds: int | None = Field(default=None, validation_alias="REFRESH_COOKIE_MAX_AGE_SECONDS")
+
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
+
+    tz: str = Field(default="UTC", validation_alias="TZ")
+
+    pool_size: int = Field(default=10, validation_alias="DB_POOL_SIZE")
+    max_overflow: int = Field(default=20, validation_alias="DB_MAX_OVERFLOW")
+
+    # Pydantic hook để mapping CORS origins, JWT, refresh session TTL, refresh cookie settings
+    def model_post_init(self, __context):
+        updates: dict[str, Any] = {}
+
+        updates.update(self._build_cors_updates())
+        updates.update(self._build_jwt_updates())
+        updates.update(self._build_refresh_session_updates())
+        updates.update(self._build_refresh_cookie_updates())  # có validate cross-field
+
+        # Apply once
+        if updates:
+            self.security = self.security.model_copy(update=updates)
+
+    # Builders nội dung update
+    def _build_cors_updates(self) -> dict[str, Any]:
+        if not self.cors_allow_origins_raw:
+            return {}
+
+        origins = [o.strip() for o in self.cors_allow_origins_raw.split(",") if o.strip()]
+        return {"cors": self.security.cors.model_copy(update={"allow_origins": origins})}
+
+    def _build_jwt_updates(self) -> dict[str, Any]:
+        issuer = (self.jwt_issuer or "").strip()
+        audience = (self.jwt_audience or "").strip()
+        secret = self.jwt_secret_key.get_secret_value().strip()
+
+        if not issuer:
+            raise ValueError("Invalid JWT config: JWT_ISSUER must not be empty")
+        if not audience:
+            raise ValueError("Invalid JWT config: JWT_AUDIENCE must not be empty")
+        if not secret:
+            raise ValueError("Invalid JWT config: JWT_SECRET_KEY must not be empty")
+        if self.access_token_expired_minutes <= 0:
+            raise ValueError("Invalid JWT config: ACCESS_TOKEN_EXPIRED_MINUTES must be > 0")
+
+        jwt_settings = JwtSettings(
+            algorithm=self.jwt_algorithm,
+            secret_key=self.jwt_secret_key,
+            issuer=issuer,
+            audience=audience,
+            access_token_ttl_minutes=self.access_token_expired_minutes,
+        )
+        return {"jwt": jwt_settings}
+
+    def _build_refresh_session_updates(self) -> dict[str, Any]:
+        if self.refresh_token_expired_minutes <= 0:
+            raise ValueError("Invalid refresh session config: REFRESH_SESSION_TTL_MINUTES must be > 0")
+
+        refresh_session = self.security.refresh_session.model_copy(
+            update={"ttl_minutes": self.refresh_token_expired_minutes}
+        )
+        return {"refresh_session": refresh_session}
+
+    def _build_refresh_cookie_updates(self) -> dict[str, Any]:
+        cookie_settings = self._merge_refresh_cookie_settings()
+        self._validate_cookie_policy(cookie_settings)
+        return {"refresh_cookie": cookie_settings}
+
+    def _merge_refresh_cookie_settings(self) -> RefreshCookieSettings:
+        refresh_updates: dict[str, Any] = {}
+
+        if self.refresh_cookie_secure is not None:
+            refresh_updates["secure"] = self.refresh_cookie_secure
+        if self.refresh_cookie_samesite is not None:
+            refresh_updates["samesite"] = self.refresh_cookie_samesite
+        if self.refresh_cookie_path:
+            refresh_updates["path"] = self.refresh_cookie_path.strip()
+        if self.refresh_cookie_max_age_seconds is not None:
+            if self.refresh_cookie_max_age_seconds <= 0:
+                raise ValueError("Invalid cookie config: REFRESH_COOKIE_MAX_AGE_SECONDS must be > 0")
+            refresh_updates["max_age_seconds"] = self.refresh_cookie_max_age_seconds
+
+        return (
+            self.security.refresh_cookie.model_copy(update=refresh_updates)
+            if refresh_updates
+            else self.security.refresh_cookie
+        )
+
+    @staticmethod
+    def _validate_cookie_policy(cookie_settings: RefreshCookieSettings) -> None:
+        if cookie_settings.samesite == "none" and cookie_settings.secure is not True:
+            raise ValueError("Invalid cookie policy: SameSite=None requires Secure=true")
+
+
+@lru_cache
+def settings_config() -> Settings:
+    # noinspection PyArgumentList
+    return Settings()
+```
+
+4. Thêm CORSMiddleware trong main.py:
+
+```python
+# main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from configs.env import settings_config
+from controllers.health_controller import health_router
+from controllers.student_controller import student_router
+from controllers.user_controller import user_router
+from core.app_logging import setup_logging
+from core.exceptions.base import BusinessException
+from core.exceptions.exception_handlers import business_exception_handler, unhandled_exception_handler
+from core.middlewares.db_session import DBSessionMiddleware
+from core.middlewares.trace_id import TraceIdMiddleware
+
+app = FastAPI()
+
+settings = settings_config()
+setup_logging(sql_echo=(settings.environment == "DEV"))
+
+# Đăng ký router
+app.include_router(health_router, tags=["Health"])
+app.include_router(user_router, prefix="/users", tags=["Users"])
+app.include_router(student_router, prefix="/students", tags=["Students"])
+
+# Đăng ký Exception Handler => thứ tự bắt buộc
+app.add_exception_handler(BusinessException, business_exception_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
+# Đăng ký middleware => thứ tự quan trọng
+app.add_middleware(DBSessionMiddleware)
+app.add_middleware(TraceIdMiddleware)  # add sau để bọc ngoài
+
+# CORS middleware (OUTERMOST)
+cors = settings.security.cors
+if cors.enabled:
+    # Guard: khi dùng cookie (allow_credentials=True) thì không được phép allow_origins="*"
+    if cors.allow_credentials and ("*" in cors.allow_origins):
+        raise RuntimeError(
+            "CORS misconfig: allow_credentials=True cannot be used with allow_origins='*'"
+        )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors.allow_origins,
+        allow_credentials=cors.allow_credentials,
+        allow_methods=cors.allow_methods,
+        allow_headers=cors.allow_headers,
+        expose_headers=cors.expose_headers,
+        max_age=cors.max_age,
+    )
+```
+
+---
+
+#### 2.9.8 TokenContextMiddleware
 
 TokenContextMiddleware chỉ parse token nhẹ, ko query DB, ko chặn request (enforce là việc của security dependencies):
 
@@ -1503,7 +2023,7 @@ TokenContextMiddleware chỉ parse token nhẹ, ko query DB, ko chặn request (
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from security.jwt_service import decode_access_token
+from security.providers import get_jwt_service
 
 
 class TokenContextMiddleware(BaseHTTPMiddleware):
@@ -1521,7 +2041,8 @@ class TokenContextMiddleware(BaseHTTPMiddleware):
 
         token = _extract_token(request)
         if token:
-            claims, err = decode_access_token(token)
+            jwt_service = get_jwt_service()
+            claims, err = jwt_service.decode_access_token(token)
             request.state.token_claims = claims
             request.state.token_error = err  # None | "expired" | "invalid"
 
@@ -1531,8 +2052,11 @@ class TokenContextMiddleware(BaseHTTPMiddleware):
 def _extract_token(request: Request) -> str | None:
     # Authorization: Bearer <token>
     auth = request.headers.get("Authorization")
-    if auth and auth.startswith("Bearer "):
-        return auth.removeprefix("Bearer ").strip()
+    if auth:
+        parts = auth.split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1].strip()
+            return token or None
 
     # Cookie fallback
     token = request.cookies.get("access_token")
@@ -1541,23 +2065,22 @@ def _extract_token(request: Request) -> str | None:
 
 ---
 
-#### 2.9.8 CurrentUser model (Principal)
+#### 2.9.9 CurrentUser model (Principal)
 
 `CurrentUser` không phải là bản sao `User`, nó là principal (danh tính) tối thiểu đủ để:
 * authorize
 * audit
 * token invalidation check
+* chỉ sống trong 1 request
 
 ```python
 # security/principals.py
-from __future__ import annotations
-
 from typing import Any
 from pydantic import BaseModel, Field, ConfigDict
 
 
 class CurrentUser(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True) # CurrentUser nên là immutable
 
     user_id: int
     roles: list[str] = Field(default_factory=list)
@@ -1566,16 +2089,23 @@ class CurrentUser(BaseModel):
     token_version: int = 1
     tenant_id: str | None = None
 
-    @classmethod
-    def from_claims(cls, claims: dict[str, Any]) -> "CurrentUser":
-        # sub thường là string -> convert
+    # factory method (tạo ra một CurrentUser):
+    # - nhận: raw claims data
+    # - nhiệm vụ: map field, set default, normalize
+    # - trả: domain object (CurrentUser)
+    @classmethod # Tại thời điểm gọi chưa
+    def from_claims(cls, claims: dict[str, Any]) -> CurrentUser:
+        # cls là param đặc biệt khi dùng chung với @classmethod
+        # cls là tham chiếu tới class đang gọi method (ở đây là CurrentUser)
+
         sub = claims.get("sub")
         roles = claims.get("roles") or []
         perms = claims.get("permissions") or []
         tv = claims.get("tv") or claims.get("token_version") or 1
 
+        # cls(...): gọi __init__ để khởi tạo đối tượng CurrentUser
         return cls(
-            user_id=int(sub),
+            user_id=int(sub), # sub thường là string -> cần convert int
             roles=list(roles),
             permissions=set(perms),
             token_version=int(tv),
@@ -1598,10 +2128,281 @@ class UserOut(BaseModel):
 
 ---
 
-#### 2.9.9 Depends: get_current_user + optional_user
+#### 2.9.10 Auth exceptions
+
+```python
+# core/exceptions/auth_exceptions.py
+from http import HTTPStatus
+from typing import Literal
+
+from core.exceptions.base import BusinessException
+
+TokenType = Literal["access", "refresh", "unknown"]
+
+
+def _error_code(base: str, token_type: TokenType) -> str:
+    """
+    base: 'TOKEN_MISSING' | 'TOKEN_INVALID' | 'TOKEN_EXPIRED'
+    => 'AUTH_ACCESS_TOKEN_MISSING' ...
+    """
+    if token_type == "access":
+        prefix = "AUTH_ACCESS"
+    elif token_type == "refresh":
+        prefix = "AUTH_REFRESH"
+    else:
+        prefix = "AUTH"
+    return f"{prefix}_{base}"
+
+
+class AuthTokenMissingException(BusinessException):
+    def __init__(self, token_type: TokenType = "unknown"):
+        super().__init__(
+            message="Authentication token is missing",
+            error_code=_error_code("TOKEN_MISSING", token_type),
+            status_code=HTTPStatus.UNAUTHORIZED,
+            extra={"token_type": token_type},
+        )
+
+
+class InvalidTokenException(BusinessException):
+    def __init__(self, token_type: TokenType = "unknown", *, reason: str | None = None):
+        extra = {"token_type": token_type}
+        if reason:
+            extra["reason"] = reason
+
+        super().__init__(
+            message="Authentication token is invalid",
+            error_code=_error_code("TOKEN_INVALID", token_type),
+            status_code=HTTPStatus.UNAUTHORIZED,
+            extra=extra,
+        )
+
+
+class TokenExpiredException(BusinessException):
+    def __init__(self, token_type: TokenType = "unknown"):
+        super().__init__(
+            message="Authentication token has expired",
+            error_code=_error_code("TOKEN_EXPIRED", token_type),
+            status_code=HTTPStatus.UNAUTHORIZED,
+            extra={"token_type": token_type},
+        )
+
+
+class UserNotFoundOrDisabledException(BusinessException):
+    def __init__(self, user_id: int | str | None):
+        super().__init__(
+            message="User is not found or disabled",
+            error_code="AUTH_USER_INVALID",
+            status_code=HTTPStatus.UNAUTHORIZED,
+            extra={"user_id": user_id},
+        )
+
+
+class ForbiddenException(BusinessException):
+    def __init__(self, required: list[str] | None = None):
+        super().__init__(
+            message="You do not have permission to perform this action",
+            error_code="AUTH_PERMISSION_DENIED",
+            status_code=HTTPStatus.FORBIDDEN,
+            extra={"required_permissions": required or []},
+        )
+```
+
+---
+
+#### 2.9.11 Security Dependencies
 
 ```python
 # security/dependencies.py
+from collections.abc import Callable
+from typing import Any
+from fastapi import Depends, Request
+
+from core.exceptions.auth_exceptions import TokenExpiredException, AuthTokenMissingException, InvalidTokenException, \
+    ForbiddenException
+from security.principals import CurrentUser
+
+
+def get_token_claims(request: Request) -> dict[str, Any] | None:
+    """
+    Lấy claims từ TokenContextMiddleware
+    Middleware đã decode sẵn vào request.state.token_claims
+    """
+    return getattr(request.state, "token_claims", None)
+
+
+def get_token_error(request: Request) -> str | None:
+    """
+    token_error: None | "expired" | "invalid" (được set từ middleware). :contentReference[oaicite:8]{index=8}
+    """
+    return getattr(request.state, "token_error", None)
+
+
+def require_current_user(
+        request: Request,
+) -> CurrentUser:
+    """
+    Dependency bắt buộc khi đăng nhập
+    - Không có token -> 401 (missing)
+    - Token expired/invalid -> 401
+    - Có claims -> build CurrentUser
+
+    Dùng cho endpoint ít nhạy cảm / nội bộ / access token TTL ngắn
+    """
+    err = get_token_error(request)
+    if err == "expired":
+        raise TokenExpiredException(token_type="access")
+    if err == "invalid":
+        raise InvalidTokenException(token_type="access")
+
+    claims = get_token_claims(request)
+    if not claims:
+        raise AuthTokenMissingException(token_type="access")
+
+    return CurrentUser.from_claims(claims)
+
+
+def require_permissions(*required: str) -> Callable[[CurrentUser], CurrentUser]:
+    """
+    Factory dependency: require_permissions("student:read", "student:write")
+    - Nếu thiếu bất kỳ permission nào -> 403
+    """
+    required_set = set(required)
+
+    def _dep(user: CurrentUser = Depends(require_current_user)) -> CurrentUser:
+        # Các permission được yêu cầu nhưng user không có
+        # dùng toán tử '-' với set
+        missing = sorted(required_set - user.permissions)
+
+        if missing:
+            raise ForbiddenException(required=missing)
+        return user
+
+    return _dep
+
+
+def require_roles(*required: str) -> Callable[[CurrentUser], CurrentUser]:
+    """
+    Factory dependency: require_roles("admin", "manager")
+    - Nếu user không có bất kỳ role nào trong required -> 403
+    """
+    required_set = set(required)
+
+    def _dep(user: CurrentUser = Depends(require_current_user)) -> CurrentUser:
+        user_roles = set(user.roles)
+
+        # Các role được yêu cầu nhưng user không có
+        missing = sorted(required_set - user_roles)
+
+        if len(missing) == len(required_set):
+            # user không có role nào trong required
+            raise ForbiddenException(required=[f"role:{r}" for r in missing])
+
+        return user
+
+    return _dep
+```
+
+```python
+# security/guards.py
+import logging
+from fastapi import Depends, Request
+from sqlalchemy.orm import Session
+
+from core.exceptions.auth_exceptions import InvalidTokenException, UserNotFoundOrDisabledException
+from security.dependencies import require_current_user
+from security.principals import CurrentUser
+from repositories.auth_repository import AuthRepository
+from dependencies.db import get_db
+
+logger = logging.getLogger(__name__)
+
+
+def get_auth_repository() -> AuthRepository:
+    return AuthRepository()
+
+
+def require_current_user_verified(
+        request: Request,
+        db: Session = Depends(get_db),
+        user: CurrentUser = Depends(require_current_user),
+        auth_repo: AuthRepository = Depends(get_auth_repository),
+) -> CurrentUser:
+    """
+    Verified principal (enterprise):
+    - Input: CurrentUser lấy từ claims (require_current_user)
+    - DB snapshot: (roles, permissions, token_version)
+    - Verify token_version: claim_tv phải == db_tv
+    - Return CurrentUser "fresh" (roles/permissions lấy theo DB)
+    """
+    # Parse user_id từ principal (sub)
+    try:
+        user_id = int(user.user_id)
+    except (TypeError, ValueError):
+        logger.warning(
+            "auth.invalid_subject",
+            extra={
+                "sub": getattr(user, "user_id", None),
+                "path": request.url.path,
+                "method": request.method,
+            },
+        )
+        # Access token đã decode được nhưng claim sub sai format -> invalid access token
+        raise InvalidTokenException("access", reason="invalid_subject")
+
+    # DB snapshot (roles/perms/token_version)
+    roles, permissions, db_token_version = auth_repo.get_authz_snapshot(db, user_id)
+
+    # user not found/disabled (repo return token_version=0 để báo invalid)
+    if not db_token_version:
+        logger.warning(
+            "auth.user_not_found_or_disabled",
+            extra={
+                "user_id": user_id,
+                "path": request.url.path,
+                "method": request.method,
+            },
+        )
+        raise UserNotFoundOrDisabledException(user_id)
+
+    # token_version check (revoke-all)
+    claim_tv = int(getattr(user, "token_version", 1))
+    if claim_tv != int(db_token_version):
+        # token bị revoke: coi như token invalid
+        logger.info( # đây không phải system error, thường log INFO là đủ (token bị revoke là event hợp lệ)
+            "auth.token_revoked",
+            extra={
+                "user_id": user_id,
+                "claim_tv": claim_tv,
+                "db_tv": int(db_token_version),
+                "path": request.url.path,
+                "method": request.method,
+            },
+        )
+        raise InvalidTokenException("access", reason="token_revoked")
+
+    # Return principal fresh theo DB (roles/perms có thể đã thay đổi)
+    return CurrentUser(
+        user_id=user_id,
+        roles=list(roles),
+        permissions=set(permissions),
+        token_version=int(db_token_version),
+        tenant_id=getattr(user, "tenant_id", None),
+    )
+```
+
+---
+
+#### 2.9.11 AuthService
+
+Là nơi xử lý toàn bộ luồng:
+* Login (verify password => phát hành access token + refresh token session + set cookie)
+* Refresh (validate/rotate refresh session => phát hành access token mới + set cookie mới)
+* Logout (revoke refresh session + clear cookie)
+* (tuỳ chọn) Logout all (revoke all sessions + bump (chủ động tăng) token_version)
+
+```python
+# services/auth_service.py
 
 ```
 

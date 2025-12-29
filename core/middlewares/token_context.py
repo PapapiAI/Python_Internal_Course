@@ -1,7 +1,7 @@
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from security.jwt_service import decode_access_token
+from security.providers import get_jwt_service
 
 
 class TokenContextMiddleware(BaseHTTPMiddleware):
@@ -19,7 +19,8 @@ class TokenContextMiddleware(BaseHTTPMiddleware):
 
         token = _extract_token(request)
         if token:
-            claims, err = decode_access_token(token)
+            jwt_service = get_jwt_service()
+            claims, err = jwt_service.decode_access_token(token)
             request.state.token_claims = claims
             request.state.token_error = err  # None | "expired" | "invalid"
 
@@ -29,8 +30,11 @@ class TokenContextMiddleware(BaseHTTPMiddleware):
 def _extract_token(request: Request) -> str | None:
     # Authorization: Bearer <token>
     auth = request.headers.get("Authorization")
-    if auth and auth.startswith("Bearer "):
-        return auth.removeprefix("Bearer ").strip()
+    if auth:
+        parts = auth.split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1].strip()
+            return token or None
 
     # Cookie fallback
     token = request.cookies.get("access_token")
